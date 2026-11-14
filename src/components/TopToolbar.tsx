@@ -1,10 +1,13 @@
 import React from 'react';
+import { DecoderConfig, DecoderKind } from '../protocol/decoders';
 import { formatDuration, formatResolution } from '../protocol/timeFormat';
 import {
   CHANNELS,
   DEPTH_PRESETS,
   PreTriggerRatio,
   RATE_PRESETS,
+  SIGNAL_GEN_PRESETS,
+  SignalGenMode,
   TriggerEdge,
 } from '../protocol/types';
 import { ConnectionStatus, TransportKind } from '../transport/SerialTransport';
@@ -17,6 +20,8 @@ export interface CaptureConfig {
   preTrigger: PreTriggerRatio;
 }
 
+const UART_BAUD_PRESETS = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 1000000];
+
 interface TopToolbarProps {
   connectionStatus: ConnectionStatus;
   transportKind: TransportKind;
@@ -27,6 +32,10 @@ interface TopToolbarProps {
   captureConfig: CaptureConfig;
   capturing: boolean;
   continuous: boolean;
+  sigGenMode: SignalGenMode;
+  decoderConfig: DecoderConfig;
+  hasCapture: boolean;
+  channelLabels?: readonly string[];
   onConnect: (backend?: 'webserial' | 'webusb') => void;
   onStartDemo: () => void;
   onDisconnect: () => void;
@@ -35,6 +44,10 @@ interface TopToolbarProps {
   onAbort: () => void;
   onToggleContinuous: () => void;
   onReleaseAll: () => void;
+  onChangeSigGen: (mode: SignalGenMode) => void;
+  onUpdateDecoderConfig: (next: DecoderConfig) => void;
+  onExportCsv: () => void;
+  onExportVcd: () => void;
 }
 
 export const TopToolbar: React.FC<TopToolbarProps> = ({
@@ -47,6 +60,10 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
   captureConfig,
   capturing,
   continuous,
+  sigGenMode,
+  decoderConfig,
+  hasCapture,
+  channelLabels,
   onConnect,
   onStartDemo,
   onDisconnect,
@@ -55,11 +72,20 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
   onAbort,
   onToggleContinuous,
   onReleaseAll,
+  onChangeSigGen,
+  onUpdateDecoderConfig,
+  onExportCsv,
+  onExportVcd,
 }) => {
   const isConnected = connectionStatus === 'connected';
   const rate = RATE_PRESETS[captureConfig.rateId] ?? RATE_PRESETS[6];
   const samples = captureConfig.blocksKb * 1024;
   const windowDurationSec = samples / rate.hz;
+
+  const chDisplay = (ch: number) => {
+    const alias = channelLabels?.[ch]?.trim();
+    return alias ? `${CHANNELS[ch].label} (${alias})` : CHANNELS[ch].label;
+  };
 
   const pillClass =
     connectionStatus === 'connected'
@@ -73,6 +99,8 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
     : connectionStatus === 'connecting'
       ? 'Connecting...'
       : 'Waiting for USB...';
+
+  const spiModeNum = (decoderConfig.spi.cpol << 1) | decoderConfig.spi.cpha;
 
   return (
     <header className="top-toolbar">
@@ -132,7 +160,7 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
             className="btn btn-danger release-all-btn"
             disabled={!isConnected}
             onClick={onReleaseAll}
-            title="Release all 8 channels (D0–D7) to High-Z Input (Z) and clear contention flags"
+            title="Release all 8 channels (D0–D7) to High-Z Input (Z), stop generator, and clear contention flags"
           >
             Release All (Z)
           </button>
@@ -200,7 +228,7 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
               <option value="free">Free Run</option>
               {CHANNELS.map((c) => (
                 <option key={c.ch} value={String(c.ch)}>
-                  {c.label}
+                  {chDisplay(c.ch)}
                 </option>
               ))}
             </select>
@@ -233,6 +261,7 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
                 { val: 0, label: '0%' },
                 { val: 1, label: '25%' },
                 { val: 2, label: '50%' },
+                { val: 3, label: '75%' },
               ] as Array<{ val: PreTriggerRatio; label: string }>
             ).map((opt) => (
               <button
@@ -249,6 +278,241 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
           </div>
         </div>
 
+        <div className="capture-control-group">
+          <label
+            className="ctrl-field"
+            title={
+              SIGNAL_GEN_PRESETS.find((p) => p.mode === sigGenMode)?.hint ??
+              'Built-in hardware pattern generator'
+            }
+          >
+            <span className="ctrl-label">Gen</span>
+            <select
+              aria-label="Built-in signal generator"
+              className="ctrl-select"
+              value={sigGenMode}
+              disabled={!isConnected}
+              onChange={(e) => onChangeSigGen(Number(e.target.value) as SignalGenMode)}
+            >
+              {SIGNAL_GEN_PRESETS.map((p) => (
+                <option key={p.mode} value={p.mode}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="ctrl-field">
+            <span className="ctrl-label">Decode</span>
+            <select
+              aria-label="Protocol decoder"
+              className="ctrl-select"
+              value={decoderConfig.kind}
+              onChange={(e) =>
+                onUpdateDecoderConfig({ ...decoderConfig, kind: e.target.value as DecoderKind })
+              }
+            >
+              <option value="none">None</option>
+              <option value="uart">UART</option>
+              <option value="spi">SPI</option>
+              <option value="i2c">I2C</option>
+            </select>
+          </label>
+
+          {decoderConfig.kind === 'uart' && (
+            <div className="decoder-subcontrols">
+              <select
+                aria-label="UART RX channel"
+                className="ctrl-select ctrl-select-sm"
+                value={decoderConfig.uart.rxCh}
+                onChange={(e) =>
+                  onUpdateDecoderConfig({
+                    ...decoderConfig,
+                    uart: { ...decoderConfig.uart, rxCh: Number(e.target.value) },
+                  })
+                }
+              >
+                {CHANNELS.map((c) => (
+                  <option key={c.ch} value={c.ch}>
+                    RX:{c.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                aria-label="UART baud rate"
+                className="ctrl-select ctrl-select-sm"
+                value={decoderConfig.uart.baud}
+                onChange={(e) =>
+                  onUpdateDecoderConfig({
+                    ...decoderConfig,
+                    uart: { ...decoderConfig.uart, baud: Number(e.target.value) },
+                  })
+                }
+              >
+                {UART_BAUD_PRESETS.map((b) => (
+                  <option key={b} value={b}>
+                    {b >= 1_000_000 ? '1M' : `${b}`}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className={`btn btn-secondary btn-compact ${decoderConfig.uart.invert ? 'active' : ''}`}
+                title="Invert UART idle/polarity"
+                onClick={() =>
+                  onUpdateDecoderConfig({
+                    ...decoderConfig,
+                    uart: { ...decoderConfig.uart, invert: !decoderConfig.uart.invert },
+                  })
+                }
+              >
+                Inv
+              </button>
+            </div>
+          )}
+
+          {decoderConfig.kind === 'spi' && (
+            <div className="decoder-subcontrols">
+              <select
+                aria-label="SPI CLK"
+                className="ctrl-select ctrl-select-sm"
+                value={decoderConfig.spi.clkCh}
+                onChange={(e) =>
+                  onUpdateDecoderConfig({
+                    ...decoderConfig,
+                    spi: { ...decoderConfig.spi, clkCh: Number(e.target.value) },
+                  })
+                }
+              >
+                {CHANNELS.map((c) => (
+                  <option key={c.ch} value={c.ch}>
+                    CLK:{c.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                aria-label="SPI MOSI"
+                className="ctrl-select ctrl-select-sm"
+                value={decoderConfig.spi.mosiCh}
+                onChange={(e) =>
+                  onUpdateDecoderConfig({
+                    ...decoderConfig,
+                    spi: { ...decoderConfig.spi, mosiCh: Number(e.target.value) },
+                  })
+                }
+              >
+                {CHANNELS.map((c) => (
+                  <option key={c.ch} value={c.ch}>
+                    MOSI:{c.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                aria-label="SPI MISO"
+                className="ctrl-select ctrl-select-sm"
+                value={decoderConfig.spi.misoCh === null ? 'none' : String(decoderConfig.spi.misoCh)}
+                onChange={(e) =>
+                  onUpdateDecoderConfig({
+                    ...decoderConfig,
+                    spi: {
+                      ...decoderConfig.spi,
+                      misoCh: e.target.value === 'none' ? null : Number(e.target.value),
+                    },
+                  })
+                }
+              >
+                <option value="none">MISO:-</option>
+                {CHANNELS.map((c) => (
+                  <option key={c.ch} value={c.ch}>
+                    MISO:{c.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                aria-label="SPI CS"
+                className="ctrl-select ctrl-select-sm"
+                value={decoderConfig.spi.csCh === null ? 'none' : String(decoderConfig.spi.csCh)}
+                onChange={(e) =>
+                  onUpdateDecoderConfig({
+                    ...decoderConfig,
+                    spi: {
+                      ...decoderConfig.spi,
+                      csCh: e.target.value === 'none' ? null : Number(e.target.value),
+                    },
+                  })
+                }
+              >
+                <option value="none">CS:-</option>
+                {CHANNELS.map((c) => (
+                  <option key={c.ch} value={c.ch}>
+                    CS:{c.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                aria-label="SPI Mode"
+                className="ctrl-select ctrl-select-sm"
+                value={spiModeNum}
+                onChange={(e) => {
+                  const m = Number(e.target.value);
+                  onUpdateDecoderConfig({
+                    ...decoderConfig,
+                    spi: {
+                      ...decoderConfig.spi,
+                      cpol: ((m >> 1) & 1) as 0 | 1,
+                      cpha: (m & 1) as 0 | 1,
+                    },
+                  });
+                }}
+              >
+                <option value={0}>M0</option>
+                <option value={1}>M1</option>
+                <option value={2}>M2</option>
+                <option value={3}>M3</option>
+              </select>
+            </div>
+          )}
+
+          {decoderConfig.kind === 'i2c' && (
+            <div className="decoder-subcontrols">
+              <select
+                aria-label="I2C SCL"
+                className="ctrl-select ctrl-select-sm"
+                value={decoderConfig.i2c.sclCh}
+                onChange={(e) =>
+                  onUpdateDecoderConfig({
+                    ...decoderConfig,
+                    i2c: { ...decoderConfig.i2c, sclCh: Number(e.target.value) },
+                  })
+                }
+              >
+                {CHANNELS.map((c) => (
+                  <option key={c.ch} value={c.ch}>
+                    SCL:{c.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                aria-label="I2C SDA"
+                className="ctrl-select ctrl-select-sm"
+                value={decoderConfig.i2c.sdaCh}
+                onChange={(e) =>
+                  onUpdateDecoderConfig({
+                    ...decoderConfig,
+                    i2c: { ...decoderConfig.i2c, sdaCh: Number(e.target.value) },
+                  })
+                }
+              >
+                {CHANNELS.map((c) => (
+                  <option key={c.ch} value={c.ch}>
+                    SDA:{c.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+
         <div className="capture-action-group">
           {!capturing ? (
             <button
@@ -256,6 +520,7 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
               className="btn btn-accent"
               disabled={!isConnected}
               onClick={onCapture}
+              title="Start single capture (Space)"
             >
               Capture
             </button>
@@ -264,7 +529,7 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
               type="button"
               className="btn btn-danger"
               onClick={onAbort}
-              title="Abort ongoing capture and retrieve partial buffer"
+              title="Abort ongoing capture and retrieve partial buffer (Space)"
             >
               Abort
             </button>
@@ -278,6 +543,25 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
             title="Auto / Continuous capture loop"
           >
             Auto
+          </button>
+
+          <button
+            type="button"
+            className="btn btn-secondary btn-compact"
+            disabled={!hasCapture}
+            onClick={onExportCsv}
+            title="Export captured waveform samples as CSV"
+          >
+            CSV
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary btn-compact"
+            disabled={!hasCapture}
+            onClick={onExportVcd}
+            title="Export captured waveform samples as IEEE-1364 VCD (GTKWave / PulseView)"
+          >
+            VCD
           </button>
         </div>
       </div>

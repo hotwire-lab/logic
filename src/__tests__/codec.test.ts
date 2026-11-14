@@ -8,6 +8,7 @@ import {
   buildPingStatusCmd,
   buildPinForceCmd,
   buildReleaseAllCmd,
+  buildSigGenCmd,
   computeXorChecksum,
   decodeBoardCapabilities,
   decodeCaptureData,
@@ -28,6 +29,7 @@ import {
   CMD_LA_CAPTURE,
   CMD_PING_STATUS,
   CMD_PIN_FORCE,
+  CMD_SIG_GEN,
   LA_FLAG_ABORTED_EARLY,
   LA_FLAG_AUTO_TIMEOUT,
   LA_FLAG_TRIGGERED,
@@ -86,6 +88,20 @@ describe('protocol codec', () => {
     });
     assertValidCmdXor(laFree);
     expect(Array.from(laFree.subarray(2, 7))).toEqual([CMD_LA_CAPTURE, 0, 0xff, 0x00, 16]);
+
+    const la75 = buildLaCaptureCmd({
+      rateId: 8,
+      triggerChannel: 6,
+      edge: 0,
+      preTrigger: 3,
+      blocksKb: 8,
+    });
+    assertValidCmdXor(la75);
+    expect(Array.from(la75.subarray(2, 7))).toEqual([CMD_LA_CAPTURE, 8, 6, 0x30, 8]);
+
+    const sigGen = buildSigGenCmd(2);
+    assertValidCmdXor(sigGen);
+    expect(Array.from(sigGen.subarray(2, 7))).toEqual([CMD_SIG_GEN, 2, 0, 0, 0]);
 
     const abort = buildLaAbortCmd();
     assertValidCmdXor(abort);

@@ -12,11 +12,13 @@ import {
   CMD_LA_CAPTURE,
   CMD_PING_STATUS,
   CMD_PIN_FORCE,
+  CMD_SIG_GEN,
   LA_FLAG_ABORTED_EARLY,
   LA_FLAG_TRIGGERED,
   PROTOCOL_SYNC_0,
   PROTOCOL_SYNC_1,
   RATE_PRESETS,
+  SignalGenMode,
   TYPE_BOARD_CAPABILITIES,
   TYPE_LA_CAPTURE_DATA,
   TYPE_STATUS_TELEMETRY,
@@ -173,6 +175,7 @@ export class SerialTransport {
   private demoShortSimPin: number | null = null;
   private demoTick = 0;
   private demoAsciiLine = '';
+  private demoSigGenMode: SignalGenMode = 0;
   private demoCaptureState: {
     rateId: number;
     trigCh: number;
@@ -836,6 +839,16 @@ export class SerialTransport {
           this.emitDemoTelemetry();
           return;
 
+        case CMD_SIG_GEN: {
+          this.demoSigGenMode = (p1 <= 4 ? p1 : 0) as SignalGenMode;
+          this.emitBytes(
+            new TextEncoder().encode(
+              `\r\n[Demo] Signal generator mode: ${this.demoSigGenMode}\r\n`
+            )
+          );
+          return;
+        }
+
         case CMD_LA_CAPTURE: {
           if (this.demoCaptureTimer !== null) {
             window.clearTimeout(this.demoCaptureTimer);
@@ -876,6 +889,7 @@ export class SerialTransport {
         case CMD_BOOTLOADER:
           this.demoForceEnable = 0;
           this.demoForcedLevel = 0;
+          this.demoSigGenMode = 0;
           this.emitDemoTelemetry();
           this.emitBytes(
             new TextEncoder().encode(
@@ -895,7 +909,7 @@ export class SerialTransport {
         if (cmd === 'help') {
           this.emitBytes(
             new TextEncoder().encode(
-              '\r\nDemo Commands: help, status, pins, release, short <0..7|off>, version\r\n'
+              '\r\nDemo Commands: help, status, pins, release, gen <off|counter|uart|spi|i2c>, short <0..7|off>, version\r\n'
             )
           );
         } else if (cmd === 'pins') {
@@ -909,8 +923,32 @@ export class SerialTransport {
           this.demoForceEnable = 0;
           this.demoForcedLevel = 0;
           this.demoContentionMask = 0;
+          this.demoSigGenMode = 0;
           this.emitDemoTelemetry();
           this.emitBytes(new TextEncoder().encode('\r\nAll channels released to Z.\r\n'));
+        } else if (cmd.startsWith('gen')) {
+          const arg = cmd.split(/\s+/)[1] ?? '';
+          const modeMap: Record<string, SignalGenMode> = {
+            off: 0,
+            '0': 0,
+            counter: 1,
+            pwm: 1,
+            '1': 1,
+            uart: 2,
+            '2': 2,
+            spi: 3,
+            '3': 3,
+            i2c: 4,
+            '4': 4,
+          };
+          if (arg in modeMap) {
+            this.demoSigGenMode = modeMap[arg];
+            this.emitBytes(
+              new TextEncoder().encode(`\r\nSignal generator set to ${arg} (mode ${this.demoSigGenMode}).\r\n`)
+            );
+          } else {
+            this.emitBytes(new TextEncoder().encode('\r\nUsage: gen <off|counter|uart|spi|i2c>\r\n'));
+          }
         } else if (cmd === 'status') {
           this.emitBytes(
             new TextEncoder().encode(
@@ -997,6 +1035,7 @@ export class SerialTransport {
     if (st.trigCh < 8) {
       if (st.preTrigRatio === 1) trigIndex = Math.floor(sampleCount / 4);
       else if (st.preTrigRatio === 2) trigIndex = Math.floor(sampleCount / 2);
+      else if (st.preTrigRatio === 3) trigIndex = Math.floor((sampleCount * 3) / 4);
     }
 
     const flags = (aborted ? LA_FLAG_ABORTED_EARLY : 0) | (st.trigCh < 8 ? LA_FLAG_TRIGGERED : 0);
@@ -1006,37 +1045,154 @@ export class SerialTransport {
     view.setUint16(4, trigIndex, true);
     view.setUint16(6, flags, true);
 
-    // Synthesize realistic 8-channel digital waveforms aligned with trigIndex
-    const period = 32;
-    const shift = st.trigCh < 8 ? (st.edge === 0 ? 16 : 0) - (trigIndex % period) : 0;
+    this.synthesizeDemoSamples(payload.subarray(8), sampleCount, rateHz, trigIndex, st);
+    this.emitBytes(encodeResponseFrame(TYPE_LA_CAPTURE_DATA, payload));
+  }
 
-    for (let i = 0; i < sampleCount; i++) {
-      const t = i + shift + 1024;
-      const d0 = (Math.floor(t / 4) & 1) ? 1 : 0; // Fast clock
-      const d1 = (Math.floor(t / 16) & 1) ? 1 : 0; // Half-rate MOSI-like burst
-      const d2 = ((Math.floor(t / 8) ^ Math.floor(t / 24)) & 1) ? 1 : 0; // Data
-      const d3 = ((t % 64) < 40) ? 0 : 1; // Chip select active low
-      const d4 = ((t % 48) < 12) ? 1 : 0; // PWM 25%
-      const d5 = ((t % 48) < 36) ? 1 : 0; // PWM 75%
-      const d6 = (Math.floor(t / 32) & 1) ? 1 : 0; // UART-ish bit clock
-      const d7 = (((t >> 4) * 5) & 1) ? 1 : 0;
+  private synthesizeDemoSamples(
+    out: Uint8Array,
+    sampleCount: number,
+    rateHz: number,
+    trigIndex: number,
+    st: { trigCh: number; edge: number }
+  ): void {
+    const mode = this.demoSigGenMode;
 
-      let sample =
-        (d0 << 0) |
-        (d1 << 1) |
-        (d2 << 2) |
-        (d3 << 3) |
-        (d4 << 4) |
-        (d5 << 5) |
-        (d6 << 6) |
-        (d7 << 7);
+    if (mode === 2) {
+      // UART 115200 8N1 on D6 ("HotWire!\r\n"), idle HIGH on D6 + gentle clock heartbeat on D0
+      const bitSamples = Math.max(2, rateHz / 115200);
+      const message = 'HotWire!\r\n';
+      const byteSpan = 10.5 * bitSamples;
+      const burstSpan = Math.round((message.length * byteSpan + 40 * bitSamples));
+      const baseOrigin = st.trigCh < 8 ? trigIndex : Math.min(sampleCount - 1, Math.round(bitSamples * 8));
 
-      // Keep forced pins steady at their forced level
-      sample = (sample & ~this.demoForceEnable) | (this.demoForcedLevel & this.demoForceEnable);
-      payload[8 + i] = sample;
+      out.fill(1 << 6);
+      for (let burstOrigin = baseOrigin; burstOrigin < sampleCount; burstOrigin += burstSpan) {
+        for (let charIdx = 0; charIdx < message.length; charIdx++) {
+          const byteVal = message.charCodeAt(charIdx);
+          const charStart = burstOrigin + charIdx * byteSpan;
+          for (let bitIdx = 0; bitIdx < 10; bitIdx++) {
+            const logicalBit = bitIdx === 0 ? 0 : bitIdx === 9 ? 1 : (byteVal >> (bitIdx - 1)) & 1;
+            const s0 = Math.max(0, Math.round(charStart + bitIdx * bitSamples));
+            const s1 = Math.min(sampleCount, Math.round(charStart + (bitIdx + 1) * bitSamples));
+            for (let s = s0; s < s1; s++) {
+              if (logicalBit === 0) out[s] &= ~(1 << 6);
+              else out[s] |= 1 << 6;
+            }
+          }
+        }
+      }
+    } else if (mode === 3) {
+      // SPI Mode 0: SCK=D0, MOSI=D1, MISO=D2, CS#=D3
+      const halfClk = Math.max(2, Math.min(12, Math.round(sampleCount / 512)));
+      const mosiBytes = [0xa5, 0x5a, 0x48, 0x57];
+      const misoBytes = [0x11, 0x22, 0x33, 0x44];
+      const csLead = halfClk * 2;
+      const frameLen = csLead * 2 + mosiBytes.length * 8 * halfClk * 2;
+      const burstSpan = frameLen + halfClk * 24;
+      const baseOrigin = st.trigCh < 8 ? trigIndex : Math.min(sampleCount - 1, halfClk * 8);
+
+      out.fill(1 << 3); // CS# idle high
+      for (let origin = baseOrigin; origin < sampleCount; origin += burstSpan) {
+        let p = origin;
+        const setSpan = (len: number, val: number) => {
+          const end = Math.min(sampleCount, p + len);
+          for (let s = Math.max(0, p); s < end; s++) out[s] = val;
+          p += len;
+        };
+        setSpan(csLead, 0); // CS# low
+        for (let idx = 0; idx < mosiBytes.length; idx++) {
+          for (let b = 7; b >= 0; b--) {
+            const mosi = (mosiBytes[idx] >> b) & 1;
+            const miso = (misoBytes[idx] >> b) & 1;
+            const dataBits = (mosi << 1) | (miso << 2);
+            setSpan(halfClk, dataBits | 0);
+            setSpan(halfClk, dataBits | 1);
+          }
+        }
+        setSpan(csLead, 0);
+      }
+    } else if (mode === 4) {
+      // I2C: SCL=D0, SDA=D1 -> START, 0x3C W ACK, 0x00 ACK, 0xAE ACK, 0xAF ACK, STOP
+      const q = Math.max(2, Math.min(12, Math.round(sampleCount / 640)));
+      const bytes = [0x3c << 1, 0x00, 0xae, 0xaf];
+      const burstSpan = q * (bytes.length * 9 * 4 + 32);
+      const baseOrigin = st.trigCh < 8 ? trigIndex : Math.min(sampleCount - 1, q * 8);
+
+      out.fill(0b11); // SCL=1, SDA=1 idle
+      for (let origin = baseOrigin; origin < sampleCount; origin += burstSpan) {
+        let p = origin;
+        const push = (scl: number, sda: number, len = q) => {
+          const val = (scl & 1) | ((sda & 1) << 1);
+          const end = Math.min(sampleCount, p + len);
+          for (let s = Math.max(0, p); s < end; s++) out[s] = val;
+          p += len;
+        };
+        // START: SDA falls while SCL=1
+        push(1, 0, q * 2);
+        push(0, 0, q);
+        for (const byteVal of bytes) {
+          for (let b = 7; b >= 0; b--) {
+            const bit = (byteVal >> b) & 1;
+            push(0, bit, q);
+            push(1, bit, q * 2);
+            push(0, bit, q);
+          }
+          // ACK (SDA=0)
+          push(0, 0, q);
+          push(1, 0, q * 2);
+          push(0, 0, q);
+        }
+        // STOP: SDA rises while SCL=1
+        push(0, 0, q);
+        push(1, 0, q * 2);
+        push(1, 1, q * 2);
+      }
+    } else if (mode === 1) {
+      // Counter / PWM mode
+      const period = 32;
+      const shift = st.trigCh < 8 ? (st.edge === 0 ? 16 : 0) - (trigIndex % period) : 0;
+      for (let i = 0; i < sampleCount; i++) {
+        const t = i + shift + 1024;
+        const c = (t >> 3) & 0x0f; // 4-bit counter on D0..D3
+        const p25 = t % 40 < 10 ? 1 : 0;
+        const p50 = t % 40 < 20 ? 1 : 0;
+        const p75 = t % 40 < 30 ? 1 : 0;
+        const clk = (t >> 1) & 1;
+        out[i] = c | (p25 << 4) | (p50 << 5) | (p75 << 6) | (clk << 7);
+      }
+    } else {
+      // Default rich mixed demo waveform when Signal Gen is Off (0)
+      const period = 32;
+      const shift = st.trigCh < 8 ? (st.edge === 0 ? 16 : 0) - (trigIndex % period) : 0;
+      for (let i = 0; i < sampleCount; i++) {
+        const t = i + shift + 1024;
+        const d0 = Math.floor(t / 4) & 1 ? 1 : 0;
+        const d1 = Math.floor(t / 16) & 1 ? 1 : 0;
+        const d2 = (Math.floor(t / 8) ^ Math.floor(t / 24)) & 1 ? 1 : 0;
+        const d3 = t % 64 < 40 ? 0 : 1;
+        const d4 = t % 48 < 12 ? 1 : 0;
+        const d5 = t % 48 < 36 ? 1 : 0;
+        const d6 = Math.floor(t / 32) & 1 ? 1 : 0;
+        const d7 = ((t >> 4) * 5) & 1 ? 1 : 0;
+        out[i] =
+          (d0 << 0) |
+          (d1 << 1) |
+          (d2 << 2) |
+          (d3 << 3) |
+          (d4 << 4) |
+          (d5 << 5) |
+          (d6 << 6) |
+          (d7 << 7);
+      }
     }
 
-    this.emitBytes(encodeResponseFrame(TYPE_LA_CAPTURE_DATA, payload));
+    // Keep forced pins steady at their forced level across all generator modes
+    if (this.demoForceEnable !== 0) {
+      for (let i = 0; i < sampleCount; i++) {
+        out[i] = (out[i] & ~this.demoForceEnable) | (this.demoForcedLevel & this.demoForceEnable);
+      }
+    }
   }
 
   private emitBytes(bytes: Uint8Array): void {

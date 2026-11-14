@@ -72,6 +72,7 @@ static const uint8_t CMD_PING_STATUS = 0x01;
 static const uint8_t CMD_GET_CAPS    = 0x02;
 static const uint8_t CMD_PIN_FORCE   = 0x10;
 static const uint8_t CMD_BATCH_FORCE = 0x11;
+static const uint8_t CMD_SIG_GEN     = 0x12;
 static const uint8_t CMD_LA_CAPTURE  = 0x20;
 static const uint8_t CMD_LA_ABORT    = 0x21;
 static const uint8_t CMD_BOOTLOADER  = 0xF0;
@@ -122,7 +123,11 @@ static volatile bool laAbortRequested = false;
 
 static TaskHandle_t core0TaskHandle = nullptr;
 static TaskHandle_t core1TaskHandle = nullptr;
+static TaskHandle_t sigGenTaskHandle = nullptr;
 static portMUX_TYPE laSpinlock = portMUX_INITIALIZER_UNLOCKED;
+static portMUX_TYPE sigSpinlock = portMUX_INITIALIZER_UNLOCKED;
+static volatile uint8_t sigGenMode = 0;
+static volatile uint8_t sigGenPinMask = 0x00;
 static bool dedicGpioReady = false;
 static uint32_t dedicInOffset = 0;
 
@@ -203,6 +208,8 @@ static void releaseAllChannels() {
   if (stateMutex) {
     xSemaphoreTake(stateMutex, portMAX_DELAY);
   }
+  sigGenMode = 0;
+  sigGenPinMask = 0x00;
   forceEnableMask = 0x00;
   forcedLevelMask = 0x00;
   contentionMask = 0x00;
@@ -325,7 +332,7 @@ static void sendTelemetryFrame() {
 
 static void sendCapabilitiesFrame() {
   static const char CAPS_JSON[] =
-    "{\"board\":\"XIAO-ESP32-S3\",\"firmware\":\"1.0.0\",\"channels\":8,"
+    "{\"board\":\"XIAO-ESP32-S3\",\"firmware\":\"1.1.0\",\"channels\":8,"
     "\"maxRateHz\":20000000,\"maxDepth\":32768,"
     "\"pins\":["
     "{\"ch\":0,\"label\":\"D0\",\"gpio\":1},"
@@ -784,6 +791,8 @@ static void LA_Capture_Core1(void* arg) {
         preTrigSamples = totalSamples / 4U;
       } else if (preTrigCode == 2) {
         preTrigSamples = totalSamples / 2U;
+      } else if (preTrigCode == 3) {
+        preTrigSamples = (totalSamples * 3U) / 4U;
       }
     }
 
@@ -849,6 +858,7 @@ static void handlePinForceCmd(uint8_t p1Ch, uint8_t p2Mode, uint8_t p3Pull, uint
 
   chMode[ch] = mode;
   chPull[ch] = pull;
+  sigGenPinMask &= (uint8_t)(~bit);
   contentionMask &= (uint8_t)(~bit);
   mismatchActive[ch] = false;
   mismatchStartUs[ch] = 0;
@@ -883,6 +893,7 @@ static void handleBatchForceCmd(uint8_t enableMask, uint8_t levelMask, uint8_t p
     xSemaphoreTake(stateMutex, portMAX_DELAY);
   }
 
+  sigGenPinMask &= (uint8_t)(~enableMask);
   forceEnableMask = enableMask;
   forcedLevelMask = levelMask & enableMask;
   contentionMask = 0x00;
@@ -925,6 +936,221 @@ static void handleEnterBootloader() {
   esp_restart();
 }
 
+// -----------------------------------------------------------------------------
+// Built-in Signal Generator (Core 0)
+// -----------------------------------------------------------------------------
+
+static inline void sigDrivePin(uint8_t ch, uint8_t level) {
+  if (sigGenPinMask & (uint8_t)(1U << ch)) {
+    preloadOutputLatch(CHANNEL_PINS[ch], level);
+  }
+}
+
+static inline void sigWaitUntilCycle(uint32_t startCyc, uint32_t offsetCyc) {
+  while ((uint32_t)(esp_cpu_get_cycle_count() - startCyc) < offsetCyc) {
+    // Tight cycle-accurate wait for bit timing
+  }
+}
+
+static uint8_t sigGenMaskForMode(uint8_t mode) {
+  switch (mode) {
+    case 1: return 0x3F; // D0..D5: 4-bit counter + 25%/75% PWM
+    case 2: return 0x40; // D6: UART 115200 TX
+    case 3: return 0x0F; // D0=SCK, D1=MOSI, D2=MISO, D3=CS#
+    case 4: return 0x03; // D0=SCL, D1=SDA
+    default: return 0x00;
+  }
+}
+
+static uint8_t sigGenIdleLevel(uint8_t mode, uint8_t ch) {
+  if (mode == 2 && ch == 6) return 1; // UART idle high
+  if (mode == 3 && ch == 3) return 1; // SPI CS# idle high
+  if (mode == 4 && (ch == 0 || ch == 1)) return 1; // I2C SCL/SDA idle high
+  return 0;
+}
+
+static void setSigGenMode(uint8_t nextMode) {
+  if (stateMutex) {
+    xSemaphoreTake(stateMutex, portMAX_DELAY);
+  }
+
+  const uint8_t mode = (nextMode <= 4) ? nextMode : 0;
+  const uint8_t prevMask = sigGenPinMask;
+  const uint8_t nextMask = (uint8_t)(sigGenMaskForMode(mode) & (uint8_t)(~forceEnableMask));
+
+  // Restore any channels no longer used by generator to their user-configured Z/pull state
+  const uint8_t releasedMask = (uint8_t)(prevMask & (uint8_t)(~nextMask));
+  sigGenPinMask = 0x00;
+  sigGenMode = 0;
+
+  for (uint8_t ch = 0; ch < CHANNEL_COUNT; ch++) {
+    const uint8_t bit = (uint8_t)(1U << ch);
+    if ((releasedMask & bit) && !(forceEnableMask & bit)) {
+      applyChannelHardware(ch, chMode[ch], chPull[ch]);
+    }
+  }
+
+  for (uint8_t ch = 0; ch < CHANNEL_COUNT; ch++) {
+    const uint8_t bit = (uint8_t)(1U << ch);
+    if (nextMask & bit) {
+      const uint8_t pin = CHANNEL_PINS[ch];
+      const uint8_t lvl = sigGenIdleLevel(mode, ch);
+      preloadOutputLatch(pin, lvl);
+      pinMode(pin, OUTPUT);
+      preloadOutputLatch(pin, lvl);
+    }
+  }
+
+  sigGenPinMask = nextMask;
+  sigGenMode = mode;
+  immediateTelemetryPending = true;
+
+  if (stateMutex) {
+    xSemaphoreGive(stateMutex);
+  }
+
+  if (mode != 0 && sigGenTaskHandle != nullptr) {
+    xTaskNotifyGive(sigGenTaskHandle);
+  }
+}
+
+static void emitSigGenCounterPwm() {
+  // ~100 kHz toggle bursts on D0..D3 + PWM 25%/75% on D4/D5
+  const uint32_t stepCyc = CPU_FREQ_HZ / 200000UL; // 5 us per step
+  for (uint8_t step = 0; step < 64 && sigGenMode == 1; step++) {
+    const uint32_t t0 = esp_cpu_get_cycle_count();
+    sigDrivePin(0, (step >> 0) & 1U);
+    sigDrivePin(1, (step >> 1) & 1U);
+    sigDrivePin(2, (step >> 2) & 1U);
+    sigDrivePin(3, (step >> 3) & 1U);
+    sigDrivePin(4, ((step & 3U) == 0U) ? 1U : 0U); // 25% duty
+    sigDrivePin(5, ((step & 3U) != 3U) ? 1U : 0U); // 75% duty
+    sigWaitUntilCycle(t0, stepCyc);
+  }
+  vTaskDelay(pdMS_TO_TICKS(2));
+}
+
+static void emitSigGenUartFrame() {
+  static const char msg[] = "HotWire!\r\n";
+  const uint32_t bitCyc = CPU_FREQ_HZ / 115200UL; // ~2083 cycles per bit
+
+  for (size_t i = 0; i < sizeof(msg) - 1 && sigGenMode == 2; i++) {
+    const uint8_t chByte = (uint8_t)msg[i];
+    portENTER_CRITICAL(&sigSpinlock);
+    const uint32_t t0 = esp_cpu_get_cycle_count();
+    sigDrivePin(6, 0); // Start bit
+    sigWaitUntilCycle(t0, bitCyc);
+    for (uint8_t b = 0; b < 8; b++) {
+      sigDrivePin(6, (chByte >> b) & 1U);
+      sigWaitUntilCycle(t0, bitCyc * (uint32_t)(b + 2U));
+    }
+    sigDrivePin(6, 1); // Stop bit
+    sigWaitUntilCycle(t0, bitCyc * 10U);
+    portEXIT_CRITICAL(&sigSpinlock);
+  }
+  vTaskDelay(pdMS_TO_TICKS(3));
+}
+
+static void emitSigGenSpiBurst() {
+  static const uint8_t mosi[4] = { 0xA5, 0x5A, 0x48, 0x57 };
+  static const uint8_t miso[4] = { 0x11, 0x22, 0x33, 0x44 };
+  const uint32_t halfCyc = CPU_FREQ_HZ / 500000UL; // 2 us half-clock (~250 kHz SCK)
+
+  portENTER_CRITICAL(&sigSpinlock);
+  uint32_t t0 = esp_cpu_get_cycle_count();
+  sigDrivePin(0, 0); // SCK low
+  sigDrivePin(3, 0); // CS# active low
+  sigWaitUntilCycle(t0, halfCyc * 2U);
+
+  for (size_t idx = 0; idx < 4 && sigGenMode == 3; idx++) {
+    for (int8_t b = 7; b >= 0; b--) {
+      sigDrivePin(1, (mosi[idx] >> b) & 1U);
+      sigDrivePin(2, (miso[idx] >> b) & 1U);
+      t0 = esp_cpu_get_cycle_count();
+      sigDrivePin(0, 0);
+      sigWaitUntilCycle(t0, halfCyc);
+      sigDrivePin(0, 1);
+      sigWaitUntilCycle(t0, halfCyc * 2U);
+    }
+  }
+
+  t0 = esp_cpu_get_cycle_count();
+  sigDrivePin(0, 0);
+  sigWaitUntilCycle(t0, halfCyc);
+  sigDrivePin(3, 1); // CS# idle high
+  portEXIT_CRITICAL(&sigSpinlock);
+
+  vTaskDelay(pdMS_TO_TICKS(3));
+}
+
+static void emitSigGenI2cByte(uint8_t byteVal, uint32_t qCyc) {
+  for (int8_t b = 7; b >= 0; b--) {
+    const uint32_t t0 = esp_cpu_get_cycle_count();
+    sigDrivePin(0, 0);
+    sigDrivePin(1, (byteVal >> b) & 1U);
+    sigWaitUntilCycle(t0, qCyc);
+    sigDrivePin(0, 1);
+    sigWaitUntilCycle(t0, qCyc * 3U);
+    sigDrivePin(0, 0);
+    sigWaitUntilCycle(t0, qCyc * 4U);
+  }
+  // 9th clock ACK (SDA=0)
+  const uint32_t tAck = esp_cpu_get_cycle_count();
+  sigDrivePin(0, 0);
+  sigDrivePin(1, 0);
+  sigWaitUntilCycle(tAck, qCyc);
+  sigDrivePin(0, 1);
+  sigWaitUntilCycle(tAck, qCyc * 3U);
+  sigDrivePin(0, 0);
+  sigWaitUntilCycle(tAck, qCyc * 4U);
+}
+
+static void emitSigGenI2cBurst() {
+  static const uint8_t payload[4] = { (uint8_t)(0x3C << 1), 0x00, 0xAE, 0xAF };
+  const uint32_t qCyc = CPU_FREQ_HZ / 400000UL; // 2.5 us quarter-bit (~100 kHz I2C)
+
+  portENTER_CRITICAL(&sigSpinlock);
+  uint32_t t0 = esp_cpu_get_cycle_count();
+  // START: SDA falls while SCL=1
+  sigDrivePin(0, 1);
+  sigDrivePin(1, 0);
+  sigWaitUntilCycle(t0, qCyc * 2U);
+  sigDrivePin(0, 0);
+  sigWaitUntilCycle(t0, qCyc * 3U);
+
+  for (size_t i = 0; i < 4 && sigGenMode == 4; i++) {
+    emitSigGenI2cByte(payload[i], qCyc);
+  }
+
+  // STOP: SDA rises while SCL=1
+  t0 = esp_cpu_get_cycle_count();
+  sigDrivePin(0, 0);
+  sigDrivePin(1, 0);
+  sigWaitUntilCycle(t0, qCyc);
+  sigDrivePin(0, 1);
+  sigWaitUntilCycle(t0, qCyc * 3U);
+  sigDrivePin(1, 1);
+  portEXIT_CRITICAL(&sigSpinlock);
+
+  vTaskDelay(pdMS_TO_TICKS(3));
+}
+
+static void SigGen_Core0_Task(void* arg) {
+  (void)arg;
+  for (;;) {
+    const uint8_t mode = sigGenMode;
+    switch (mode) {
+      case 1: emitSigGenCounterPwm(); break;
+      case 2: emitSigGenUartFrame(); break;
+      case 3: emitSigGenSpiBurst(); break;
+      case 4: emitSigGenI2cBurst(); break;
+      default:
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100));
+        break;
+    }
+  }
+}
+
 static void dispatchBinaryCommand(const uint8_t cmd[8]) {
   const uint8_t cmdId = cmd[2];
   const uint8_t p1 = cmd[3];
@@ -947,6 +1173,10 @@ static void dispatchBinaryCommand(const uint8_t cmd[8]) {
 
     case CMD_BATCH_FORCE:
       handleBatchForceCmd(p1, p2, p3);
+      break;
+
+    case CMD_SIG_GEN:
+      setSigGenMode(p1);
       break;
 
     case CMD_LA_CAPTURE:
@@ -983,11 +1213,12 @@ static void handleAsciiLine(const char* line) {
       "  help     - Show this command list\r\n"
       "  status   - Print live pin states and contention status\r\n"
       "  pins     - Show D0..D7 GPIO mapping\r\n"
-      "  release  - Release all 8 channels to Z (High-Z)\r\n"
+      "  release  - Release all 8 channels to Z and stop signal generator\r\n"
+      "  gen <m>  - Signal generator: off | counter | uart | spi | i2c\r\n"
       "  version  - Show firmware version\r\n"
     );
   } else if (strcmp(line, "version") == 0) {
-    sendTextLocked("\r\nHotWire-XIAO-ESP32S3 v1.0.0 (20 MHz 8-ch LA + Tri-State Force I/O)\r\n");
+    sendTextLocked("\r\nHotWire-XIAO-ESP32S3 v1.1.0 (20 MHz 8-ch LA + Tri-State Force I/O + SigGen)\r\n");
   } else if (strcmp(line, "pins") == 0) {
     sendTextLocked(
       "\r\nCH0=D0(GPIO1) CH1=D1(GPIO2) CH2=D2(GPIO3) CH3=D3(GPIO4)\r\n"
@@ -996,17 +1227,35 @@ static void handleAsciiLine(const char* line) {
   } else if (strcmp(line, "release") == 0) {
     releaseAllChannels();
     sendTextLocked("\r\n[HotWire] All channels D0..D7 released to Z.\r\n");
+  } else if (strncmp(line, "gen ", 4) == 0 || strcmp(line, "gen") == 0) {
+    const char* arg = (line[3] == ' ') ? (line + 4) : "";
+    uint8_t nextMode = 255;
+    if (strcmp(arg, "off") == 0 || strcmp(arg, "0") == 0) nextMode = 0;
+    else if (strcmp(arg, "counter") == 0 || strcmp(arg, "pwm") == 0 || strcmp(arg, "1") == 0) nextMode = 1;
+    else if (strcmp(arg, "uart") == 0 || strcmp(arg, "2") == 0) nextMode = 2;
+    else if (strcmp(arg, "spi") == 0 || strcmp(arg, "3") == 0) nextMode = 3;
+    else if (strcmp(arg, "i2c") == 0 || strcmp(arg, "4") == 0) nextMode = 4;
+
+    if (nextMode <= 4) {
+      setSigGenMode(nextMode);
+      char buf[64];
+      snprintf(buf, sizeof(buf), "\r\n[HotWire] Signal generator mode=%u (mask=0x%02X)\r\n", nextMode, sigGenPinMask);
+      sendTextLocked(buf);
+    } else {
+      sendTextLocked("\r\nUsage: gen <off|counter|uart|spi|i2c>\r\n");
+    }
   } else if (strcmp(line, "status") == 0) {
     uint8_t phys = readAllChannelsFast();
-    char buf[160];
+    char buf[192];
     snprintf(
       buf,
       sizeof(buf),
-      "\r\n[STATUS] phys=0x%02X forceEn=0x%02X forced=0x%02X contention=0x%02X\r\n",
+      "\r\n[STATUS] phys=0x%02X forceEn=0x%02X forced=0x%02X contention=0x%02X sigGen=%u\r\n",
       phys,
       forceEnableMask,
       forcedLevelMask,
-      contentionMask
+      contentionMask,
+      sigGenMode
     );
     sendTextLocked(buf);
   } else if (line[0] != '\0') {
@@ -1025,7 +1274,7 @@ static void checkContentionWatchdog(uint64_t nowUs) {
 
   for (uint8_t ch = 0; ch < CHANNEL_COUNT; ch++) {
     const uint8_t bit = (uint8_t)(1U << ch);
-    if ((forceEnableMask & bit) && (protectMask & bit)) {
+    if ((forceEnableMask & bit) && !(sigGenPinMask & bit) && (protectMask & bit)) {
       const bool expected = (forcedLevelMask & bit) != 0;
       const bool actual = (physical & bit) != 0;
       if (actual != expected) {
@@ -1156,6 +1405,7 @@ static void Protocol_Core0_Task(void* arg) {
 // -----------------------------------------------------------------------------
 
 void setup() {
+  REG_CLR_BIT(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
   stateMutex = xSemaphoreCreateMutex();
   txMutex = xSemaphoreCreateMutex();
 
@@ -1189,6 +1439,16 @@ void setup() {
     nullptr,
     2,
     &core0TaskHandle,
+    0
+  );
+
+  xTaskCreatePinnedToCore(
+    SigGen_Core0_Task,
+    "SigGen_Core0",
+    2048,
+    nullptr,
+    1,
+    &sigGenTaskHandle,
     0
   );
 }

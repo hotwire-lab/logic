@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { CHANNELS, PinForceMode, PinPullMode, StatusTelemetry } from '../protocol/types';
 
 export interface ChannelUiState {
@@ -11,16 +11,32 @@ interface ChannelStripProps {
   connected: boolean;
   telemetry: StatusTelemetry;
   channelConfigs: ChannelUiState[];
+  channelLabels?: readonly string[];
   onForceChannel: (ch: number, mode: PinForceMode, pull: PinPullMode, protect?: boolean) => void;
+  onRenameChannel?: (ch: number, alias: string) => void;
 }
 
 export const ChannelStrip: React.FC<ChannelStripProps> = ({
   connected,
   telemetry,
   channelConfigs,
+  channelLabels,
   onForceChannel,
+  onRenameChannel,
 }) => {
   const pulseRestoreRef = useRef<Map<number, { mode: PinForceMode; pull: PinPullMode }>>(new Map());
+  const [editingCh, setEditingCh] = useState<number | null>(null);
+  const [draftAlias, setDraftAlias] = useState('');
+
+  const beginEditAlias = (ch: number, currentAlias: string) => {
+    setEditingCh(ch);
+    setDraftAlias(currentAlias);
+  };
+
+  const commitAlias = (ch: number) => {
+    setEditingCh(null);
+    onRenameChannel?.(ch, draftAlias.trim());
+  };
 
   const handlePulseDown = (
     e: React.PointerEvent<HTMLButtonElement>,
@@ -81,8 +97,36 @@ export const ChannelStrip: React.FC<ChannelStripProps> = ({
               <div className="ch-id-cell">
                 <span className="ch-color-bar" style={{ backgroundColor: meta.color }} />
                 <div className="ch-labels">
-                  <span className="ch-name">{meta.label}</span>
-                  <span className="ch-gpio">GPIO {meta.gpio}</span>
+                  {editingCh === meta.ch ? (
+                    <input
+                      type="text"
+                      className="ch-alias-input"
+                      maxLength={14}
+                      autoFocus
+                      value={draftAlias}
+                      placeholder={meta.label}
+                      onChange={(e) => setDraftAlias(e.target.value)}
+                      onBlur={() => commitAlias(meta.ch)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') commitAlias(meta.ch);
+                        else if (e.key === 'Escape') setEditingCh(null);
+                      }}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      className="ch-name-btn"
+                      title="Click to rename channel alias"
+                      onClick={() => beginEditAlias(meta.ch, channelLabels?.[meta.ch] ?? '')}
+                    >
+                      {channelLabels?.[meta.ch]?.trim() || meta.label}
+                    </button>
+                  )}
+                  <span className="ch-gpio">
+                    {channelLabels?.[meta.ch]?.trim()
+                      ? `${meta.label} · GPIO ${meta.gpio}`
+                      : `GPIO ${meta.gpio}`}
+                  </span>
                 </div>
               </div>
 

@@ -154,6 +154,18 @@ body,
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
+.decoder-subcontrols {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.ctrl-select-sm {
+  padding: 2px 5px;
+  font-size: 11px;
+}
+
 .window-badge {
   padding: 3px 8px;
   border-radius: 5px;
@@ -221,7 +233,8 @@ body,
   background: #da3633;
 }
 
-.btn-toggle.active {
+.btn-toggle.active,
+.btn-secondary.active {
   background: rgba(88, 166, 255, 0.22);
   border-color: var(--accent-blue);
   color: var(--accent-blue);
@@ -298,8 +311,8 @@ body,
 }
 
 .channel-strip-header {
-  flex: 0 0 26px;
-  height: 26px;
+  flex: 0 0 46px;
+  height: 46px;
   display: grid;
   grid-template-columns: 76px 46px 76px 34px 1fr;
   align-items: center;
@@ -354,17 +367,54 @@ body,
   display: flex;
   flex-direction: column;
   line-height: 1.1;
+  min-width: 0;
 }
 
-.ch-name {
+.ch-name,
+.ch-name-btn {
   font-size: 12px;
   font-weight: 700;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
+.ch-name-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ch-name-btn:hover {
+  color: var(--accent-blue);
+  text-decoration: underline;
+}
+
+.ch-alias-input {
+  width: 100%;
+  min-width: 0;
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+  border: 1px solid var(--accent-blue);
+  border-radius: 3px;
+  padding: 1px 3px;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  outline: none;
+}
+
 .ch-gpio {
   font-size: 10px;
   color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .ch-live-cell {
@@ -461,10 +511,12 @@ body,
 
 .waveform-overlay-controls {
   position: absolute;
-  top: 32px;
+  top: 52px;
   right: 10px;
   display: flex;
   gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   z-index: 3;
 }
 
@@ -483,6 +535,124 @@ body,
 .overlay-btn.active {
   border-color: var(--accent-cyan);
   color: var(--accent-cyan);
+}
+
+.pulse-hud {
+  position: absolute;
+  top: 52px;
+  left: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 3px 9px;
+  border-radius: 6px;
+  background: rgba(13, 17, 23, 0.88);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.pulse-hud-ch {
+  font-weight: 700;
+}
+
+.edge-count-tag {
+  color: #7ee787;
+  font-weight: 600;
+}
+
+/* Decoded Protocol Strip */
+.decoded-strip {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border-subtle);
+  overflow-x: auto;
+  min-height: 32px;
+}
+
+.decoded-strip-title {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.decoded-strip-empty {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.decoded-strip-list {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: nowrap;
+}
+
+.decoded-chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+  padding: 2px 7px;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  cursor: pointer;
+}
+
+.decoded-chip:hover {
+  border-color: var(--accent-blue);
+}
+
+.decoded-chip.selected {
+  border-color: #ffffff;
+  background: rgba(88, 166, 255, 0.22);
+}
+
+.decoded-chip-start {
+  border-color: rgba(63, 185, 80, 0.55);
+}
+
+.decoded-chip-stop {
+  border-color: rgba(240, 136, 62, 0.55);
+}
+
+.decoded-chip-addr {
+  border-color: rgba(188, 140, 255, 0.55);
+}
+
+.decoded-chip-error {
+  border-color: rgba(248, 81, 73, 0.75);
+  color: #ffa198;
+}
+
+.decoded-chip-time {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.decoded-chip-val {
+  font-weight: 700;
+}
+
+.decoded-strip-more {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 0 4px;
+  white-space: nowrap;
 }
 
 .delta-badge {

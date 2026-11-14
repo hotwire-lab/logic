@@ -7,6 +7,7 @@ import {
   CMD_LA_CAPTURE,
   CMD_PING_STATUS,
   CMD_PIN_FORCE,
+  CMD_SIG_GEN,
   CaptureDataFrame,
   DecodedPacket,
   LA_FLAG_ABORTED_EARLY,
@@ -17,6 +18,7 @@ import {
   PinForceMode,
   PinPullMode,
   PreTriggerRatio,
+  SignalGenMode,
   StatusTelemetry,
   TYPE_BOARD_CAPABILITIES,
   TYPE_LA_CAPTURE_DATA,
@@ -90,6 +92,10 @@ export function buildBatchForceCmd(
     pullupMask & 0xff,
     0x00
   );
+}
+
+export function buildSigGenCmd(mode: SignalGenMode): Uint8Array {
+  return buildCommandFrame(CMD_SIG_GEN, mode & 0xff, 0x00, 0x00, 0x00);
 }
 
 export function encodeTriggerConfig(edge: TriggerEdge, preTrigger: PreTriggerRatio): number {

@@ -6,6 +6,7 @@ export const CMD_PING_STATUS = 0x01;
 export const CMD_GET_CAPS = 0x02;
 export const CMD_PIN_FORCE = 0x10;
 export const CMD_BATCH_FORCE = 0x11;
+export const CMD_SIG_GEN = 0x12;
 export const CMD_LA_CAPTURE = 0x20;
 export const CMD_LA_ABORT = 0x21;
 export const CMD_BOOTLOADER = 0xf0;
@@ -21,7 +22,22 @@ export const LA_FLAG_ABORTED_EARLY = 0x0004;
 export type PinForceMode = 0 | 1 | 2; // 0 = Z, 1 = Force 0, 2 = Force 1
 export type PinPullMode = 0 | 1 | 2; // 0 = None, 1 = Pull-Up, 2 = Pull-Down
 export type TriggerEdge = 0 | 1 | 2; // 0 = Falling, 1 = Rising, 2 = Any
-export type PreTriggerRatio = 0 | 1 | 2; // 0 = 0%, 1 = 25%, 2 = 50%
+export type PreTriggerRatio = 0 | 1 | 2 | 3; // 0 = 0%, 1 = 25%, 2 = 50%, 3 = 75%
+export type SignalGenMode = 0 | 1 | 2 | 3 | 4; // 0 = Off, 1 = Counter/PWM, 2 = UART 115200, 3 = SPI Burst, 4 = I2C 0x3C
+
+export interface SignalGenPreset {
+  mode: SignalGenMode;
+  label: string;
+  hint: string;
+}
+
+export const SIGNAL_GEN_PRESETS: readonly SignalGenPreset[] = [
+  { mode: 0, label: 'Off', hint: 'Signal generator disabled (High-Z)' },
+  { mode: 1, label: 'Counter / PWM', hint: 'Square waves on D0..D3 (D0 fastest)' },
+  { mode: 2, label: 'UART 115200', hint: 'UART TX frames on D6 ("HotWire!")' },
+  { mode: 3, label: 'SPI Burst', hint: 'SCK=D0, MOSI=D1, MISO=D2, CS#=D3' },
+  { mode: 4, label: 'I2C 0x3C', hint: 'SCL=D0, SDA=D1 OLED write burst' },
+] as const;
 
 export interface ChannelDescriptor {
   ch: number;
