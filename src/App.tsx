@@ -5,7 +5,6 @@ import { CaptureConfig, TopToolbar } from './components/TopToolbar';
 import { WaveformCanvas } from './components/WaveformCanvas';
 import { ProtocolDemuxer } from './protocol/ProtocolDemuxer';
 import {
-  buildBootloaderCmd,
   buildLaAbortCmd,
   buildLaCaptureCmd,
   buildPinForceCmd,
@@ -215,32 +214,42 @@ export const App: React.FC = () => {
     };
   }, []);
 
-  const handlePrepareBootloaderPort = useCallback(async (): Promise<WebSerialPort | null> => {
-    const transport = transportRef.current!;
-    const snap = transport.getSnapshot();
-    const hadWebSerial = snap.status === 'connected' && snap.transport === 'webserial';
+  const handlePrepareBootloaderPort = useCallback(
+    async (forcePromptPort = false): Promise<WebSerialPort | null> => {
+      const transport = transportRef.current!;
+      transport.setAutoReconnectPaused(true);
 
-    if (snap.status === 'connected') {
-      await transport.writeBytes(buildBootloaderCmd());
-      await new Promise<void>((resolve) => window.setTimeout(resolve, 180));
-    }
+      let chosenPort: WebSerialPort | null = null;
+      const snap = transport.getSnapshot();
+      const hadWebSerial = snap.status === 'connected' && snap.transport === 'webserial';
 
-    const prevPort = await transport.disconnect(true);
-    await new Promise<void>((resolve) => window.setTimeout(resolve, 1200));
-
-    if (hadWebSerial && navigator.serial) {
-      const ports = await navigator.serial.getPorts();
-      if (ports.length > 0) {
-        return ports[0];
+      if ((forcePromptPort || !hadWebSerial) && navigator.serial) {
+        try {
+          chosenPort = await navigator.serial.requestPort();
+        } catch (err) {
+          transport.setAutoReconnectPaused(false);
+          throw err;
+        }
       }
-      return prevPort;
-    }
-    return null;
-  }, []);
 
-  const handleFlashComplete = useCallback(async () => {
-    await new Promise<void>((resolve) => window.setTimeout(resolve, 1000));
-    await transportRef.current?.probeAuthorizedDevices();
+      const prevPort = await transport.disconnect(true);
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 150));
+
+      return chosenPort ?? (hadWebSerial ? prevPort : null);
+    },
+    []
+  );
+
+  const handleFlashComplete = useCallback(async (flashedPort?: WebSerialPort | null) => {
+    const transport = transportRef.current;
+    if (!transport) return;
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 600));
+    transport.setAutoReconnectPaused(false);
+    if (flashedPort) {
+      await transport.connectWebSerialPort(flashedPort);
+    } else {
+      await transport.probeAuthorizedDevices();
+    }
   }, []);
 
   const hasWebSerial = typeof navigator !== 'undefined' && 'serial' in navigator && Boolean(navigator.serial);

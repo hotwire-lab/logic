@@ -18,8 +18,8 @@ interface BottomDrawerProps {
   isDemo: boolean;
   onSendText: (text: string) => void;
   onRegisterTerminalWriter: (writer: (bytes: Uint8Array) => void) => () => void;
-  onPrepareBootloaderPort: () => Promise<WebSerialPort | null>;
-  onFlashComplete: () => Promise<void>;
+  onPrepareBootloaderPort: (forcePromptPort?: boolean) => Promise<WebSerialPort | null>;
+  onFlashComplete: (flashedPort?: WebSerialPort | null) => Promise<void>;
 }
 
 const TERMINAL_MACROS = ['help', 'status', 'pins', 'release', 'version'] as const;
@@ -39,7 +39,7 @@ export const BottomDrawer: React.FC<BottomDrawerProps> = ({
 
   // Flasher state
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [flashOffset, setFlashOffset] = useState<'0x10000' | '0x0' | 'full'>('0x10000');
+  const [flashOffset, setFlashOffset] = useState<'0x10000' | '0x0' | 'full'>('full');
   const [flashing, setFlashing] = useState(false);
   const [flashProgress, setFlashProgress] = useState(0);
   const [flashLogs, setFlashLogs] = useState<string[]>([
@@ -156,7 +156,7 @@ export const BottomDrawer: React.FC<BottomDrawerProps> = ({
     setInputText('');
   };
 
-  const handleFlash = async () => {
+  const handleFlash = async (forcePromptPort = false) => {
     if (flashing) return;
     if (typeof navigator === 'undefined' || !navigator.serial) {
       appendFlashLog('ERROR: Web Serial API (navigator.serial) is required for esptool-js flashing.');
@@ -169,12 +169,22 @@ export const BottomDrawer: React.FC<BottomDrawerProps> = ({
 
     setFlashing(true);
     setFlashProgress(0);
-    setFlashLogs(['[1/4] Preparing firmware image & rebooting XIAO-ESP32-S3 to bootloader...']);
+    setFlashLogs(['[1/4] Selecting serial port & preparing firmware image...']);
 
+    const sleep = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
     let espTransport: EspTransport | null = null;
+    let port: WebSerialPort | null = null;
+    let flashedSucceeded = false;
 
     try {
-      // Load firmware bytes first before touching serial state
+      // Prompt / release active transport FIRST inside the user click gesture
+      port = await onPrepareBootloaderPort(forcePromptPort);
+      if (!port) {
+        appendFlashLog('Select the ESP32-S3 COM port in the browser prompt...');
+        port = await navigator.serial.requestPort();
+      }
+
+      // Load firmware binaries after acquiring the target serial port
       const fileArray: Array<{ data: Uint8Array; address: number }> = [];
 
       if (selectedFile) {
@@ -183,20 +193,24 @@ export const BottomDrawer: React.FC<BottomDrawerProps> = ({
         fileArray.push({ data: buf, address: addr });
         appendFlashLog(`Loaded ${selectedFile.name} (${buf.byteLength} bytes) -> 0x${addr.toString(16)}`);
       } else if (flashOffset === 'full') {
-        const [bootRes, partRes, appRes] = await Promise.all([
+        const [bootRes, partRes, bootApp0Res, appRes] = await Promise.all([
           fetch('./firmware/HotWire_XIAO_ESP32S3.ino.bootloader.bin'),
           fetch('./firmware/HotWire_XIAO_ESP32S3.ino.partitions.bin'),
+          fetch('./firmware/boot_app0.bin'),
           fetch('./firmware/HotWire_XIAO_ESP32S3.ino.bin'),
         ]);
-        if (!bootRes.ok || !partRes.ok || !appRes.ok) {
+        if (!bootRes.ok || !partRes.ok || !bootApp0Res.ok || !appRes.ok) {
           throw new Error('Failed to fetch bundled firmware binaries.');
         }
         fileArray.push(
           { data: new Uint8Array(await bootRes.arrayBuffer()), address: 0x0 },
           { data: new Uint8Array(await partRes.arrayBuffer()), address: 0x8000 },
+          { data: new Uint8Array(await bootApp0Res.arrayBuffer()), address: 0xe000 },
           { data: new Uint8Array(await appRes.arrayBuffer()), address: 0x10000 }
         );
-        appendFlashLog('Loaded bundled Bootloader (0x0), Partitions (0x8000), and App (0x10000).');
+        appendFlashLog(
+          'Loaded bundled Bootloader (0x0), Partitions (0x8000), boot_app0 (0xe000), and App (0x10000).'
+        );
       } else {
         const appRes = await fetch('./firmware/HotWire_XIAO_ESP32S3.ino.bin');
         if (!appRes.ok) {
@@ -205,13 +219,6 @@ export const BottomDrawer: React.FC<BottomDrawerProps> = ({
         const appBuf = new Uint8Array(await appRes.arrayBuffer());
         fileArray.push({ data: appBuf, address: 0x10000 });
         appendFlashLog(`Loaded bundled HotWire_XIAO_ESP32S3.ino.bin (${appBuf.byteLength} bytes) -> 0x10000`);
-      }
-
-      // Send 0xF0 CMD_BOOTLOADER (if connected) and acquire Web Serial port
-      let port = await onPrepareBootloaderPort();
-      if (!port) {
-        appendFlashLog('Select the ESP32-S3 Bootloader COM port in the browser prompt...');
-        port = await navigator.serial.requestPort();
       }
 
       const terminalAdapter: IEspLoaderTerminal = {
@@ -228,28 +235,55 @@ export const BottomDrawer: React.FC<BottomDrawerProps> = ({
 
       const loader = new ESPLoader({
         transport: espTransport,
-        baudrate: 921600,
-        romBaudrate: 921600,
+        baudrate: 115200,
+        romBaudrate: 115200,
         terminal: terminalAdapter,
+        resetConstructors: {
+          usbJTAGSerialReset: (transport) => ({
+            transport,
+            async reset() {
+              await transport.setRTS(false);
+              await transport.setDTR(false);
+              await sleep(100);
+              await transport.setDTR(true);
+              await transport.setRTS(false);
+              await sleep(100);
+              await transport.setRTS(true);
+              await transport.setDTR(false);
+              await transport.setRTS(true);
+              await sleep(100);
+              await transport.setRTS(false);
+              await transport.setDTR(false);
+              await sleep(120);
+            },
+          }),
+        },
       });
 
-      appendFlashLog('[2/4] Syncing with ESP32-S3 ROM bootloader...');
+      appendFlashLog('[2/4] Entering & syncing with ESP32-S3 ROM bootloader...');
       try {
-        await loader.main('no_reset');
-      } catch {
-        appendFlashLog('Retrying sync with hardware reset...');
         await loader.main('default_reset');
+      } catch {
+        appendFlashLog('Reset sync did not answer; retrying direct no_reset sync...');
+        try {
+          await espTransport.disconnect();
+        } catch {
+          // Ignore close cleanup before retry
+        }
+        await sleep(150);
+        await loader.main('no_reset');
       }
 
       appendFlashLog('[3/4] Writing flash...');
       const totalBytes = fileArray.reduce((acc, f) => acc + f.data.byteLength, 0);
       let completedPrevFiles = 0;
+      const isBundledFull = !selectedFile && flashOffset === 'full';
 
       await loader.writeFlash({
         fileArray,
-        flashSize: 'keep',
-        flashMode: 'keep',
-        flashFreq: 'keep',
+        flashSize: isBundledFull ? '8MB' : 'keep',
+        flashMode: isBundledFull ? 'dio' : 'keep',
+        flashFreq: isBundledFull ? '80m' : 'keep',
         eraseAll: false,
         compress: true,
         reportProgress: (fileIndex: number, written: number, total: number) => {
@@ -265,7 +299,13 @@ export const BottomDrawer: React.FC<BottomDrawerProps> = ({
 
       appendFlashLog('[4/4] Hard resetting XIAO-ESP32-S3...');
       await loader.after('hard_reset');
+      await espTransport.setDTR(false);
+      await espTransport.setRTS(true);
+      await sleep(100);
+      await espTransport.setRTS(false);
+      await sleep(80);
       setFlashProgress(100);
+      flashedSucceeded = true;
       appendFlashLog('Flash complete! Reconnecting HotWire...');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -279,7 +319,7 @@ export const BottomDrawer: React.FC<BottomDrawerProps> = ({
         }
       }
       setFlashing(false);
-      await onFlashComplete();
+      await onFlashComplete(flashedSucceeded ? port : null);
     }
   };
 
@@ -383,8 +423,8 @@ export const BottomDrawer: React.FC<BottomDrawerProps> = ({
                 disabled={flashing}
                 onChange={(e) => setFlashOffset(e.target.value as '0x10000' | '0x0' | 'full')}
               >
+                <option value="full">Bundled Full Image (Boot + Partitions + App) — Recommended</option>
                 <option value="0x10000">App Firmware @ 0x10000</option>
-                <option value="full">Bundled Full Image (Boot + Partitions + App)</option>
                 <option value="0x0">Merged .bin @ 0x0</option>
               </select>
             </label>
@@ -416,11 +456,22 @@ export const BottomDrawer: React.FC<BottomDrawerProps> = ({
               </button>
             )}
 
+            {connected && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-compact"
+                disabled={flashing}
+                onClick={() => void handleFlash(true)}
+              >
+                Select Port &amp; Flash...
+              </button>
+            )}
+
             <button
               type="button"
               className="btn btn-accent"
               disabled={flashing}
-              onClick={() => void handleFlash()}
+              onClick={() => void handleFlash(false)}
             >
               {flashing ? `Flashing ${flashProgress}%...` : 'Reboot to Bootloader & Flash .bin'}
             </button>

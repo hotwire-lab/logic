@@ -185,8 +185,10 @@ export class SerialTransport {
   private wakeLockSentinel: ScreenWakeLockSentinel | null = null;
   private sessionEpoch = 0;
   private listenersAttached = false;
+  private autoReconnectPaused = false;
 
   private readonly onHardwareConnect = () => {
+    if (this.autoReconnectPaused) return;
     if (this.snapshot.status === 'waiting') {
       void this.probeAuthorizedDevices();
     }
@@ -252,8 +254,22 @@ export class SerialTransport {
     return this.webSerialPort;
   }
 
+  setAutoReconnectPaused(paused: boolean): void {
+    this.autoReconnectPaused = paused;
+  }
+
+  async connectWebSerialPort(port: WebSerialPort): Promise<void> {
+    await this.openWebSerialPort(port);
+  }
+
   async probeAuthorizedDevices(): Promise<void> {
-    if (this.snapshot.status === 'connected' || this.snapshot.status === 'connecting') return;
+    if (
+      this.autoReconnectPaused ||
+      this.snapshot.status === 'connected' ||
+      this.snapshot.status === 'connecting'
+    ) {
+      return;
+    }
     const preferred = detectPreferredBackend();
 
     try {
@@ -676,11 +692,6 @@ export class SerialTransport {
     }
 
     if (this.webSerialWriter) {
-      try {
-        await this.webSerialWriter.close();
-      } catch {
-        // Ignore close failure
-      }
       try {
         this.webSerialWriter.releaseLock();
       } catch {
