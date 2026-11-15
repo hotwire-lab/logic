@@ -12,7 +12,6 @@ import {
   PulseMeasurement,
   countChannelEdges,
   findNearestEdge,
-  findNextChannelEdge,
   measurePulseAtSample,
 } from '../protocol/decoders';
 import {
@@ -107,7 +106,7 @@ export const WaveformCanvas = forwardRef<WaveformCanvasHandle, WaveformCanvasPro
       height: 360,
     });
     const [view, setView] = useState<ViewWindow>({ startSample: 0, visibleSamples: 1024 });
-    const [showCursors, setShowCursors] = useState(true);
+    const [showCursors, setShowCursors] = useState(false);
     const [cursorA, setCursorA] = useState(256);
     const [cursorB, setCursorB] = useState(768);
     const [activeChannel, setActiveChannel] = useState(0);
@@ -121,6 +120,7 @@ export const WaveformCanvas = forwardRef<WaveformCanvasHandle, WaveformCanvasPro
     captureRef.current = capture;
     const sizeRef = useRef(size);
     sizeRef.current = size;
+    const prevCaptureLenRef = useRef<number>(0);
 
     const activePointers = useRef<Map<number, { x: number; y: number }>>(new Map());
     const dragModeRef = useRef<
@@ -171,20 +171,42 @@ export const WaveformCanvas = forwardRef<WaveformCanvasHandle, WaveformCanvasPro
       return { density, maxDensity, bins };
     }, [capture]);
 
-    // Reset zoom and cursor positions when a new capture arrives
+    const clampView = useCallback(
+      (startSample: number, visibleSamples: number, totalOverride?: number): ViewWindow => {
+        const total = totalOverride ?? captureRef.current?.samples.byteLength ?? 1024;
+        const minVis = Math.min(total, 4);
+        const clampedVis = Math.max(minVis, Math.min(total, visibleSamples));
+        const maxStart = Math.max(0, total - clampedVis);
+        const clampedStart = Math.max(0, Math.min(maxStart, startSample));
+        return { startSample: clampedStart, visibleSamples: clampedVis };
+      },
+      []
+    );
+
+    // Reset zoom only when capture depth changes; preserve zoom/pan on same-length re-captures
     useEffect(() => {
-      if (!capture || capture.samples.byteLength === 0) return;
+      if (!capture || capture.samples.byteLength === 0) {
+        prevCaptureLenRef.current = 0;
+        return;
+      }
       const total = capture.samples.byteLength;
-      setView({ startSample: 0, visibleSamples: total });
       const trig = Math.min(total - 1, Math.max(0, capture.triggerIndex));
-      setCursorA(Math.max(0, Math.round(total * 0.25)));
-      setCursorB(
-        trig > 0 && trig < total - 1 ? trig : Math.min(total - 1, Math.round(total * 0.65))
-      );
+      if (prevCaptureLenRef.current !== total) {
+        setView({ startSample: 0, visibleSamples: total });
+        setCursorA(Math.max(0, Math.round(total * 0.25)));
+        setCursorB(
+          trig > 0 && trig < total - 1 ? trig : Math.min(total - 1, Math.round(total * 0.65))
+        );
+      } else {
+        setView((prev) => clampView(prev.startSample, prev.visibleSamples, total));
+        setCursorA((prev) => Math.max(0, Math.min(total - 1, prev)));
+        setCursorB((prev) => Math.max(0, Math.min(total - 1, prev)));
+      }
+      prevCaptureLenRef.current = total;
       setHoverState(null);
       setSnapMarker(null);
       setBoxZoomRange(null);
-    }, [capture]);
+    }, [capture, clampView]);
 
     // Track canvas container dimensions
     useEffect(() => {
@@ -200,18 +222,6 @@ export const WaveformCanvas = forwardRef<WaveformCanvasHandle, WaveformCanvasPro
       observer.observe(el);
       return () => observer.disconnect();
     }, []);
-
-    const clampView = useCallback(
-      (startSample: number, visibleSamples: number, totalOverride?: number): ViewWindow => {
-        const total = totalOverride ?? captureRef.current?.samples.byteLength ?? 1024;
-        const minVis = Math.min(total, 4);
-        const clampedVis = Math.max(minVis, Math.min(total, visibleSamples));
-        const maxStart = Math.max(0, total - clampedVis);
-        const clampedStart = Math.max(0, Math.min(maxStart, startSample));
-        return { startSample: clampedStart, visibleSamples: clampedVis };
-      },
-      []
-    );
 
     const zoomAroundX = useCallback(
       (factor: number, xPx: number) => {
@@ -265,18 +275,6 @@ export const WaveformCanvas = forwardRef<WaveformCanvasHandle, WaveformCanvasPro
       if (!capture || capture.samples.byteLength === 0) return;
       centerViewOnSample(capture.triggerIndex, true);
     }, [capture, centerViewOnSample]);
-
-    const jumpChannelEdge = useCallback(
-      (dir: -1 | 1) => {
-        if (!capture || capture.samples.byteLength < 2) return;
-        const curCenter = viewRef.current.startSample + viewRef.current.visibleSamples / 2;
-        const edgeIdx = findNextChannelEdge(capture.samples, activeChannel, curCenter, dir);
-        if (edgeIdx !== null) {
-          centerViewOnSample(edgeIdx, false);
-        }
-      },
-      [activeChannel, capture, centerViewOnSample]
-    );
 
     useImperativeHandle(
       ref,
@@ -346,8 +344,12 @@ export const WaveformCanvas = forwardRef<WaveformCanvasHandle, WaveformCanvasPro
       const canvas = canvasRef.current;
       if (!canvas) return;
       const dpr = window.devicePixelRatio || 1;
-      canvas.width = Math.round(size.width * dpr);
-      canvas.height = Math.round(size.height * dpr);
+      const targetW = Math.round(size.width * dpr);
+      const targetH = Math.round(size.height * dpr);
+      if (canvas.width !== targetW || canvas.height !== targetH) {
+        canvas.width = targetW;
+        canvas.height = targetH;
+      }
 
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
@@ -402,7 +404,7 @@ export const WaveformCanvas = forwardRef<WaveformCanvasHandle, WaveformCanvasPro
         ctx.fillText(
           capturing
             ? 'Waiting for trigger / capturing samples...'
-            : 'Connect XIAO-ESP32-S3 or launch Demo, then click Capture',
+            : 'Connect USB device or launch Demo, then click Capture (Space)',
           width / 2,
           TOP_HEIGHT + (height - TOP_HEIGHT) / 2
         );
@@ -433,7 +435,12 @@ export const WaveformCanvas = forwardRef<WaveformCanvasHandle, WaveformCanvasPro
         }
       }
 
-      if (capture.triggerIndex >= 0 && capture.triggerIndex < total) {
+      const hasTriggerMarker =
+        (capture.triggered || capture.autoTriggered || capture.triggerIndex > 0) &&
+        capture.triggerIndex >= 0 &&
+        capture.triggerIndex < total;
+
+      if (hasTriggerMarker) {
         const mTrigX = (capture.triggerIndex / total) * width;
         ctx.fillStyle = capture.autoTriggered ? '#8B949E' : '#F0883E';
         ctx.fillRect(Math.round(mTrigX) - 1, 1, 2, MINIMAP_HEIGHT - 2);
@@ -635,7 +642,7 @@ export const WaveformCanvas = forwardRef<WaveformCanvasHandle, WaveformCanvasPro
       }
 
       // 4. Vertical Trigger Position Marker
-      if (capture.triggerIndex >= 0 && capture.triggerIndex < total) {
+      if (hasTriggerMarker) {
         const trigX = sampleToX(capture.triggerIndex);
         if (trigX >= 0 && trigX <= width) {
           ctx.save();
@@ -900,15 +907,20 @@ export const WaveformCanvas = forwardRef<WaveformCanvasHandle, WaveformCanvasPro
         if (y >= TOP_HEIGHT) {
           const ch = yToChannel(y);
           const sampleIdx = xToSample(x);
-          const measurement = measurePulseAtSample(
-            capture.samples,
-            ch,
-            sampleIdx,
-            capture.sampleRateHz
-          );
-          setHoverState({ x, y, ch, sampleIdx, measurement });
+          setHoverState((prev) => {
+            if (prev && prev.x === x && prev.ch === ch && prev.sampleIdx === sampleIdx) {
+              return prev;
+            }
+            const measurement = measurePulseAtSample(
+              capture.samples,
+              ch,
+              sampleIdx,
+              capture.sampleRateHz
+            );
+            return { x, y, ch, sampleIdx, measurement };
+          });
         } else {
-          setHoverState(null);
+          setHoverState((prev) => (prev === null ? prev : null));
         }
         return;
       }
@@ -1021,6 +1033,9 @@ export const WaveformCanvas = forwardRef<WaveformCanvasHandle, WaveformCanvasPro
 
     const activeLabel =
       channelLabels?.[activeChannel]?.trim() || CHANNELS[activeChannel]?.label || `D${activeChannel}`;
+    const hasTrigger = Boolean(
+      capture && (capture.triggered || capture.autoTriggered || capture.triggerIndex > 0)
+    );
 
     return (
       <div className="waveform-pane" ref={containerRef}>
@@ -1055,30 +1070,16 @@ export const WaveformCanvas = forwardRef<WaveformCanvasHandle, WaveformCanvasPro
             <button type="button" className="overlay-btn" title="Fit full capture (F)" onClick={fitAll}>
               Fit
             </button>
-            <button
-              type="button"
-              className="overlay-btn"
-              title="Center on Trigger (T)"
-              onClick={jumpToTrigger}
-            >
-              Trig
-            </button>
-            <button
-              type="button"
-              className="overlay-btn"
-              title={`Previous edge on ${activeLabel}`}
-              onClick={() => jumpChannelEdge(-1)}
-            >
-              ◀ {activeLabel}
-            </button>
-            <button
-              type="button"
-              className="overlay-btn"
-              title={`Next edge on ${activeLabel}`}
-              onClick={() => jumpChannelEdge(1)}
-            >
-              {activeLabel} ▶
-            </button>
+            {hasTrigger && (
+              <button
+                type="button"
+                className="overlay-btn"
+                title="Center on Trigger (T)"
+                onClick={jumpToTrigger}
+              >
+                Trig
+              </button>
+            )}
             <button
               type="button"
               className={`overlay-btn ${showCursors ? 'active' : ''}`}
@@ -1109,20 +1110,24 @@ export const WaveformCanvas = forwardRef<WaveformCanvasHandle, WaveformCanvasPro
           </div>
         )}
 
-        {capture && showCursors && (
+        {capture && (showCursors || capture.abortedEarly || capture.autoTriggered) && (
           <div className="delta-badge" aria-live="polite">
-            <span className="cursor-a-tag">
-              A: {formatSignedDuration((cursorA - capture.triggerIndex) / rateHz)}
-            </span>
-            <span className="cursor-b-tag">
-              B: {formatSignedDuration((cursorB - capture.triggerIndex) / rateHz)}
-            </span>
-            <span className="delta-tag">
-              Δt: {formatDuration(deltaSec)} ({freqHz > 0 ? formatFrequency(freqHz) : '∞'})
-            </span>
-            <span className="edge-count-tag" title={`Edges on ${activeLabel} between A and B`}>
-              {activeLabel}: ↑{betweenEdges.rising} ↓{betweenEdges.falling}
-            </span>
+            {showCursors && (
+              <>
+                <span className="cursor-a-tag">
+                  A: {formatSignedDuration((cursorA - capture.triggerIndex) / rateHz)}
+                </span>
+                <span className="cursor-b-tag">
+                  B: {formatSignedDuration((cursorB - capture.triggerIndex) / rateHz)}
+                </span>
+                <span className="delta-tag">
+                  Δt: {formatDuration(deltaSec)} ({freqHz > 0 ? formatFrequency(freqHz) : '∞'})
+                </span>
+                <span className="edge-count-tag" title={`Edges on ${activeLabel} between A and B`}>
+                  {activeLabel}: ↑{betweenEdges.rising} ↓{betweenEdges.falling}
+                </span>
+              </>
+            )}
             {capture.abortedEarly && <span className="flag-tag flag-warn">ABORTED</span>}
             {capture.autoTriggered && <span className="flag-tag flag-muted">AUTO-TRIG</span>}
           </div>

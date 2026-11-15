@@ -469,7 +469,7 @@ export class SerialTransport {
       this.updateSnapshot({
         status: 'connected',
         transport: 'webserial',
-        deviceName: 'XIAO-ESP32-S3',
+        deviceName: 'HotWire USB',
         vidPid,
         errorMessage: null,
       });
@@ -477,9 +477,15 @@ export class SerialTransport {
       void this.acquireWakeLock();
       void this.runWebSerialReadLoop(port, epoch);
 
-      // Query capabilities and immediate pin telemetry
+      // Query capabilities and immediate pin telemetry (+ retry after CDC settle)
       await this.writeBytes(buildGetCapsCmd());
       await this.writeBytes(buildPingStatusCmd());
+      window.setTimeout(() => {
+        if (epoch === this.sessionEpoch && this.snapshot.status === 'connected') {
+          void this.writeBytes(buildGetCapsCmd());
+          void this.writeBytes(buildPingStatusCmd());
+        }
+      }, 250);
     } catch (err) {
       await this.closeAllHandles(false);
       const msg = err instanceof Error ? err.message : String(err);
@@ -600,7 +606,7 @@ export class SerialTransport {
       this.updateSnapshot({
         status: 'connected',
         transport: 'webusb',
-        deviceName: device.productName?.trim() || 'XIAO-ESP32-S3',
+        deviceName: device.productName?.trim() || 'HotWire USB',
         vidPid,
         errorMessage: null,
       });
@@ -611,6 +617,12 @@ export class SerialTransport {
 
       await this.writeBytes(buildGetCapsCmd());
       await this.writeBytes(buildPingStatusCmd());
+      window.setTimeout(() => {
+        if (epoch === this.sessionEpoch && this.snapshot.status === 'connected') {
+          void this.writeBytes(buildGetCapsCmd());
+          void this.writeBytes(buildPingStatusCmd());
+        }
+      }, 250);
     } catch (err) {
       await this.closeAllHandles(false);
       const msg = err instanceof Error ? err.message : String(err);

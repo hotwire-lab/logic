@@ -27,11 +27,10 @@ interface TopToolbarProps {
   transportKind: TransportKind;
   deviceName: string;
   errorMessage: string | null;
-  hasWebSerial: boolean;
-  hasWebUSB: boolean;
   captureConfig: CaptureConfig;
   capturing: boolean;
   continuous: boolean;
+  hasActiveOutputs: boolean;
   sigGenMode: SignalGenMode;
   decoderConfig: DecoderConfig;
   hasCapture: boolean;
@@ -55,11 +54,10 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
   transportKind,
   deviceName,
   errorMessage,
-  hasWebSerial,
-  hasWebUSB,
   captureConfig,
   capturing,
   continuous,
+  hasActiveOutputs,
   sigGenMode,
   decoderConfig,
   hasCapture,
@@ -121,20 +119,10 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
                 type="button"
                 className="btn btn-primary"
                 onClick={() => onConnect()}
-                title="Connect via default browser USB transport"
+                title="Connect via browser USB transport (Web Serial / WebUSB)"
               >
                 Connect
               </button>
-              {hasWebSerial && hasWebUSB && (
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-compact"
-                  onClick={() => onConnect('webusb')}
-                  title="Force WebUSB CDC-ACM transport (DTR+RTS control transfer)"
-                >
-                  WebUSB
-                </button>
-              )}
               <button
                 type="button"
                 className="btn btn-secondary"
@@ -158,7 +146,7 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
           <button
             type="button"
             className="btn btn-danger release-all-btn"
-            disabled={!isConnected}
+            disabled={!isConnected || !hasActiveOutputs}
             onClick={onReleaseAll}
             title="Release all 8 channels (D0–D7) to High-Z Input (Z), stop generator, and clear contention flags"
           >
@@ -234,48 +222,52 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
             </select>
           </label>
 
-          <div className="seg-group" role="group" aria-label="Trigger edge">
-            {(
-              [
-                { val: 1, label: '↑', title: 'Rising edge' },
-                { val: 0, label: '↓', title: 'Falling edge' },
-                { val: 2, label: '↕', title: 'Any edge' },
-              ] as Array<{ val: TriggerEdge; label: string; title: string }>
-            ).map((opt) => (
-              <button
-                key={opt.val}
-                type="button"
-                title={opt.title}
-                disabled={capturing || captureConfig.triggerChannel === null}
-                className={`seg-btn ${captureConfig.edge === opt.val ? 'active' : ''}`}
-                onClick={() => onUpdateCaptureConfig({ edge: opt.val })}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
+          {captureConfig.triggerChannel !== null && (
+            <>
+              <div className="seg-group" role="group" aria-label="Trigger edge">
+                {(
+                  [
+                    { val: 1, label: '↑', title: 'Rising edge' },
+                    { val: 0, label: '↓', title: 'Falling edge' },
+                    { val: 2, label: '↕', title: 'Any edge' },
+                  ] as Array<{ val: TriggerEdge; label: string; title: string }>
+                ).map((opt) => (
+                  <button
+                    key={opt.val}
+                    type="button"
+                    title={opt.title}
+                    disabled={capturing}
+                    className={`seg-btn ${captureConfig.edge === opt.val ? 'active' : ''}`}
+                    onClick={() => onUpdateCaptureConfig({ edge: opt.val })}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
 
-          <div className="seg-group" role="group" aria-label="Pre-trigger ratio">
-            {(
-              [
-                { val: 0, label: '0%' },
-                { val: 1, label: '25%' },
-                { val: 2, label: '50%' },
-                { val: 3, label: '75%' },
-              ] as Array<{ val: PreTriggerRatio; label: string }>
-            ).map((opt) => (
-              <button
-                key={opt.val}
-                type="button"
-                title={`Pre-trigger buffer ${opt.label}`}
-                disabled={capturing || captureConfig.triggerChannel === null}
-                className={`seg-btn ${captureConfig.preTrigger === opt.val ? 'active' : ''}`}
-                onClick={() => onUpdateCaptureConfig({ preTrigger: opt.val })}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
+              <div className="seg-group" role="group" aria-label="Pre-trigger ratio">
+                {(
+                  [
+                    { val: 0, label: '0%' },
+                    { val: 1, label: '25%' },
+                    { val: 2, label: '50%' },
+                    { val: 3, label: '75%' },
+                  ] as Array<{ val: PreTriggerRatio; label: string }>
+                ).map((opt) => (
+                  <button
+                    key={opt.val}
+                    type="button"
+                    title={`Pre-trigger buffer ${opt.label}`}
+                    disabled={capturing}
+                    className={`seg-btn ${captureConfig.preTrigger === opt.val ? 'active' : ''}`}
+                    onClick={() => onUpdateCaptureConfig({ preTrigger: opt.val })}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
 
         <div className="capture-control-group">
@@ -545,24 +537,26 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
             Auto
           </button>
 
-          <button
-            type="button"
-            className="btn btn-secondary btn-compact"
-            disabled={!hasCapture}
-            onClick={onExportCsv}
-            title="Export captured waveform samples as CSV"
-          >
-            CSV
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary btn-compact"
-            disabled={!hasCapture}
-            onClick={onExportVcd}
-            title="Export captured waveform samples as IEEE-1364 VCD (GTKWave / PulseView)"
-          >
-            VCD
-          </button>
+          {hasCapture && (
+            <>
+              <button
+                type="button"
+                className="btn btn-secondary btn-compact"
+                onClick={onExportCsv}
+                title="Export captured waveform samples as CSV"
+              >
+                CSV
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-compact"
+                onClick={onExportVcd}
+                title="Export captured waveform samples as IEEE-1364 VCD (GTKWave / PulseView)"
+              >
+                VCD
+              </button>
+            </>
+          )}
         </div>
       </div>
     </header>

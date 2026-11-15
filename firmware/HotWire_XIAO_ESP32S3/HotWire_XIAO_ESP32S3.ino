@@ -1672,20 +1672,22 @@ static void Protocol_Core0_Task(void* arg) {
     // 2. 20 ms Bus Contention Auto-Cutoff Guard
     checkContentionWatchdog(nowUs);
 
-    // 3. 25 Hz Idle & Change-Driven Live Pin Telemetry
-    const uint8_t curPhysical = readAllChannelsFast();
-    const bool physicalChanged = (curPhysical != lastPhysical);
-    const bool periodicDue = (nowUs - lastTelemetryUs) >= TELEMETRY_INTERVAL_US;
-    const bool changeDue = physicalChanged && ((nowUs - lastChangeTelemetryUs) >= CHANGE_THROTTLE_US);
+    // 3. 25 Hz Idle & Change-Driven Live Pin Telemetry (pause while LA capture/TX active)
+    if (!laCaptureActive) {
+      const uint8_t curPhysical = readAllChannelsFast();
+      const uint8_t externalChanged = (uint8_t)((curPhysical ^ lastPhysical) & (uint8_t)(~sigGenPinMask));
+      const bool periodicDue = (nowUs - lastTelemetryUs) >= TELEMETRY_INTERVAL_US;
+      const bool changeDue = (externalChanged != 0U) && ((nowUs - lastChangeTelemetryUs) >= CHANGE_THROTTLE_US);
 
-    if (immediateTelemetryPending || periodicDue || changeDue) {
-      immediateTelemetryPending = false;
-      lastPhysical = curPhysical;
-      lastTelemetryUs = nowUs;
-      if (physicalChanged) {
-        lastChangeTelemetryUs = nowUs;
+      if (immediateTelemetryPending || periodicDue || changeDue) {
+        immediateTelemetryPending = false;
+        lastPhysical = curPhysical;
+        lastTelemetryUs = nowUs;
+        if (externalChanged != 0U) {
+          lastChangeTelemetryUs = nowUs;
+        }
+        sendTelemetryFrame();
       }
-      sendTelemetryFrame();
     }
 
     vTaskDelay(1);

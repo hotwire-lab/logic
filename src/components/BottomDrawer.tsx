@@ -53,6 +53,7 @@ export const BottomDrawer: React.FC<BottomDrawerProps> = ({
 
   // Flasher state
   const [targetBoard, setTargetBoard] = useState<FlashTargetBoard>('auto');
+  const [showCustomBin, setShowCustomBin] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [flashOffset, setFlashOffset] = useState<'0x10000' | '0x0' | 'full'>('full');
   const [flashing, setFlashing] = useState(false);
@@ -312,7 +313,6 @@ export const BottomDrawer: React.FC<BottomDrawerProps> = ({
 
       appendFlashLog('[3/4] Writing flash...');
       const totalBytes = fileArray.reduce((acc, f) => acc + f.data.byteLength, 0);
-      let completedPrevFiles = 0;
       const isBundledFull = !selectedFile && flashOffset === 'full';
 
       await loader.writeFlash({
@@ -323,12 +323,16 @@ export const BottomDrawer: React.FC<BottomDrawerProps> = ({
         eraseAll: false,
         compress: true,
         reportProgress: (fileIndex: number, written: number, total: number) => {
-          if (fileIndex > 0) {
-            completedPrevFiles = fileArray
-              .slice(0, fileIndex)
-              .reduce((acc, f) => acc + f.data.byteLength, 0);
-          }
-          const ratio = totalBytes > 0 ? (completedPrevFiles + written) / totalBytes : written / Math.max(1, total);
+          const completedPrevFiles = fileArray
+            .slice(0, fileIndex)
+            .reduce((acc, f) => acc + f.data.byteLength, 0);
+          const currentFileBytes = fileArray[fileIndex]
+            ? fileArray[fileIndex].data.byteLength * (written / Math.max(1, total))
+            : written;
+          const ratio =
+            totalBytes > 0
+              ? (completedPrevFiles + currentFileBytes) / totalBytes
+              : written / Math.max(1, total);
           setFlashProgress(Math.min(100, Math.round(ratio * 100)));
         },
       });
@@ -468,52 +472,14 @@ export const BottomDrawer: React.FC<BottomDrawerProps> = ({
               </select>
             </label>
 
-            <label className="ctrl-field">
-              <span className="ctrl-label">Target Image</span>
-              <select
-                className="ctrl-select"
-                value={flashOffset}
-                disabled={flashing}
-                onChange={(e) => setFlashOffset(e.target.value as '0x10000' | '0x0' | 'full')}
-              >
-                <option value="full">Bundled Full Image (Boot + Partitions + App) — Recommended</option>
-                <option value="0x10000">App Firmware @ 0x10000</option>
-                <option value="0x0">Merged .bin @ 0x0</option>
-              </select>
-            </label>
-
-            <label className="file-picker-label">
-              <span>
-                {selectedFile
-                  ? selectedFile.name
-                  : targetBoard === 'auto'
-                    ? 'Using bundled firmware (S3 / C6 auto)'
-                    : `Using bundled ${BOARD_FLASH_PROFILES[targetBoard].prefix}.bin`}
-              </span>
-              <input
-                type="file"
-                accept=".bin"
-                disabled={flashing}
-                onChange={(e) => {
-                  const file = e.target.files?.[0] ?? null;
-                  setSelectedFile(file);
-                  if (file && flashOffset === 'full') {
-                    setFlashOffset('0x10000');
-                  }
-                }}
-              />
-            </label>
-
-            {selectedFile && (
-              <button
-                type="button"
-                className="btn btn-secondary btn-compact"
-                disabled={flashing}
-                onClick={() => setSelectedFile(null)}
-              >
-                Use Bundled
-              </button>
-            )}
+            <button
+              type="button"
+              className="btn btn-accent"
+              disabled={flashing}
+              onClick={() => void handleFlash(false)}
+            >
+              {flashing ? `Flashing ${flashProgress}%...` : 'Flash Firmware'}
+            </button>
 
             {connected && (
               <button
@@ -522,18 +488,78 @@ export const BottomDrawer: React.FC<BottomDrawerProps> = ({
                 disabled={flashing}
                 onClick={() => void handleFlash(true)}
               >
-                Select Port &amp; Flash...
+                Select Other Port...
               </button>
             )}
 
             <button
               type="button"
-              className="btn btn-accent"
+              className={`btn btn-secondary btn-compact ${showCustomBin ? 'active' : ''}`}
               disabled={flashing}
-              onClick={() => void handleFlash(false)}
+              onClick={() => {
+                setShowCustomBin((prev) => {
+                  const next = !prev;
+                  if (!next) {
+                    setSelectedFile(null);
+                    setFlashOffset('full');
+                  }
+                  return next;
+                });
+              }}
             >
-              {flashing ? `Flashing ${flashProgress}%...` : 'Reboot to Bootloader & Flash .bin'}
+              Custom .bin...
             </button>
+
+            {showCustomBin && (
+              <>
+                <label className="ctrl-field">
+                  <span className="ctrl-label">Target Image</span>
+                  <select
+                    className="ctrl-select"
+                    value={flashOffset}
+                    disabled={flashing}
+                    onChange={(e) => setFlashOffset(e.target.value as '0x10000' | '0x0' | 'full')}
+                  >
+                    <option value="full">Bundled Full Image (Boot + Partitions + App)</option>
+                    <option value="0x10000">App Firmware @ 0x10000</option>
+                    <option value="0x0">Merged .bin @ 0x0</option>
+                  </select>
+                </label>
+
+                <label className="file-picker-label">
+                  <span>
+                    {selectedFile
+                      ? selectedFile.name
+                      : targetBoard === 'auto'
+                        ? 'Choose .bin file...'
+                        : `Choose .bin (${BOARD_FLASH_PROFILES[targetBoard].prefix})`}
+                  </span>
+                  <input
+                    type="file"
+                    accept=".bin"
+                    disabled={flashing}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0] ?? null;
+                      setSelectedFile(file);
+                      if (file && flashOffset === 'full') {
+                        setFlashOffset('0x10000');
+                      }
+                    }}
+                  />
+                </label>
+
+                {selectedFile && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-compact"
+                    disabled={flashing}
+                    onClick={() => setSelectedFile(null)}
+                  >
+                    Use Bundled
+                  </button>
+                )}
+              </>
+            )}
           </div>
 
           <div className="flash-progress-track" aria-label="Flashing progress">

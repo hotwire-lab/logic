@@ -202,26 +202,28 @@ export const ChannelStrip: React.FC<ChannelStripProps> = ({
               </div>
 
               <div className="ch-pull-cell">
-                <div className="seg-group seg-pull" role="group" aria-label={`${meta.label} pull resistor`}>
-                  {(
-                    [
-                      { pull: 0, label: '-', title: 'Floating (No pull)' },
-                      { pull: 1, label: 'PU', title: 'Internal Pull-Up (~45 kΩ)' },
-                      { pull: 2, label: 'PD', title: 'Internal Pull-Down (~45 kΩ)' },
-                    ] as Array<{ pull: PinPullMode; label: string; title: string }>
-                  ).map((opt) => (
-                    <button
-                      key={opt.pull}
-                      type="button"
-                      title={opt.title}
-                      disabled={!connected || !isZMode}
-                      className={`seg-btn ${cfg.pull === opt.pull ? 'active' : ''}`}
-                      onClick={() => onForceChannel(meta.ch, 0, opt.pull, cfg.protect)}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
+                <button
+                  type="button"
+                  disabled={!connected || !isZMode}
+                  className={`btn-pull ${cfg.pull !== 0 && isZMode ? 'active' : ''}`}
+                  onClick={() =>
+                    onForceChannel(
+                      meta.ch,
+                      0,
+                      ((cfg.pull + 1) % 3) as PinPullMode,
+                      cfg.protect
+                    )
+                  }
+                  title={
+                    cfg.pull === 1
+                      ? 'Internal Pull-Up (~45 kΩ) — click to switch to Pull-Down'
+                      : cfg.pull === 2
+                        ? 'Internal Pull-Down (~45 kΩ) — click to release floating (-)'
+                        : 'Floating (No pull) — click to cycle PU / PD'
+                  }
+                >
+                  {cfg.pull === 1 ? 'PU' : cfg.pull === 2 ? 'PD' : '-'}
+                </button>
               </div>
             </div>
           );

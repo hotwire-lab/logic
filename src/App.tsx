@@ -25,6 +25,7 @@ import {
   CaptureDataFrame,
   PinForceMode,
   PinPullMode,
+  RATE_PRESETS,
   SignalGenMode,
   StatusTelemetry,
   TYPE_BOARD_CAPABILITIES,
@@ -116,12 +117,34 @@ export const App: React.FC = () => {
 
   const terminalWriterRef = useRef<((bytes: Uint8Array) => void) | null>(null);
   const continuousTimerRef = useRef<number | null>(null);
+  const captureWatchdogRef = useRef<number | null>(null);
+  const abortWatchdogRef = useRef<number | null>(null);
+
+  const clearCaptureWatchdogs = useCallback(() => {
+    if (captureWatchdogRef.current !== null) {
+      window.clearTimeout(captureWatchdogRef.current);
+      captureWatchdogRef.current = null;
+    }
+    if (abortWatchdogRef.current !== null) {
+      window.clearTimeout(abortWatchdogRef.current);
+      abortWatchdogRef.current = null;
+    }
+  }, []);
 
   const triggerCapture = useCallback(() => {
     const transport = transportRef.current;
     if (!transport || statusRef.current !== 'connected') return;
     const cfg = captureConfigRef.current;
     setCapturing(true);
+    if (captureWatchdogRef.current !== null) {
+      window.clearTimeout(captureWatchdogRef.current);
+    }
+    const rateHz = RATE_PRESETS[cfg.rateId]?.hz ?? 1_000_000;
+    const timeoutMs = Math.ceil(((cfg.blocksKb * 1024) / rateHz) * 1000) + 6500;
+    captureWatchdogRef.current = window.setTimeout(() => {
+      captureWatchdogRef.current = null;
+      setCapturing(false);
+    }, timeoutMs);
     void transport.writeBytes(
       buildLaCaptureCmd({
         rateId: cfg.rateId,
@@ -139,22 +162,33 @@ export const App: React.FC = () => {
       onPacket: (packet) => {
         if (packet.typeId === TYPE_STATUS_TELEMETRY) {
           const tel = packet.telemetry;
-          setTelemetry(tel);
-          setChannelConfigs((prev) =>
-            prev.map((cfg, ch) => {
+          setTelemetry((prev) =>
+            prev.physicalLevels === tel.physicalLevels &&
+            prev.forceEnableMask === tel.forceEnableMask &&
+            prev.forcedLevels === tel.forcedLevels &&
+            prev.contentionMask === tel.contentionMask
+              ? prev
+              : tel
+          );
+          setChannelConfigs((prev) => {
+            let anyChanged = false;
+            const next = prev.map((cfg, ch) => {
               const bit = 1 << ch;
               const isForced = (tel.forceEnableMask & bit) !== 0;
               const isHigh = (tel.forcedLevels & bit) !== 0;
               const nextMode: PinForceMode = isForced ? (isHigh ? 2 : 1) : 0;
               if (cfg.mode !== nextMode) {
+                anyChanged = true;
                 return { ...cfg, mode: nextMode };
               }
               return cfg;
-            })
-          );
+            });
+            return anyChanged ? next : prev;
+          });
         } else if (packet.typeId === TYPE_BOARD_CAPABILITIES) {
           setBoardCaps(packet.capabilities);
         } else if (packet.typeId === TYPE_LA_CAPTURE_DATA) {
+          clearCaptureWatchdogs();
           setCapture(packet.capture);
           setSelectedFrameId(null);
           setCapturing(false);
@@ -181,6 +215,7 @@ export const App: React.FC = () => {
         setSigGenMode(0);
         setCapturing(false);
         setContinuous(false);
+        clearCaptureWatchdogs();
         if (continuousTimerRef.current !== null) {
           window.clearTimeout(continuousTimerRef.current);
           continuousTimerRef.current = null;
@@ -195,6 +230,7 @@ export const App: React.FC = () => {
     transport.init();
 
     return () => {
+      clearCaptureWatchdogs();
       if (continuousTimerRef.current !== null) {
         window.clearTimeout(continuousTimerRef.current);
       }
@@ -202,7 +238,7 @@ export const App: React.FC = () => {
       unsubState();
       transport.destroy();
     };
-  }, [triggerCapture]);
+  }, [clearCaptureWatchdogs, triggerCapture]);
 
   const handleConnect = (backend?: 'webserial' | 'webusb') => {
     void transportRef.current?.connect(backend);
@@ -230,26 +266,39 @@ export const App: React.FC = () => {
   const handleChangeSigGen = (mode: SignalGenMode) => {
     setSigGenMode(mode);
     void transportRef.current?.writeBytes(buildSigGenCmd(mode));
-    if (decoderConfig.kind === 'none') {
-      if (mode === 2) {
-        setDecoderConfig((prev) => ({
-          ...prev,
-          kind: 'uart',
-          uart: { rxCh: 6, baud: 115200, invert: false },
-        }));
-      } else if (mode === 3) {
-        setDecoderConfig((prev) => ({
-          ...prev,
-          kind: 'spi',
-          spi: { clkCh: 0, mosiCh: 1, misoCh: 2, csCh: 3, cpol: 0, cpha: 0, bitOrder: 'msb' },
-        }));
-      } else if (mode === 4) {
-        setDecoderConfig((prev) => ({
-          ...prev,
-          kind: 'i2c',
-          i2c: { sclCh: 0, sdaCh: 1 },
-        }));
+    if (mode === 2) {
+      setSelectedFrameId(null);
+      setDecoderConfig((prev) => ({
+        ...prev,
+        kind: 'uart',
+        uart: { rxCh: 6, baud: 115200, invert: false },
+      }));
+      if (captureConfig.rateId < 5) {
+        setCaptureConfig((prev) => ({ ...prev, rateId: 6 }));
       }
+    } else if (mode === 3) {
+      setSelectedFrameId(null);
+      setDecoderConfig((prev) => ({
+        ...prev,
+        kind: 'spi',
+        spi: { clkCh: 0, mosiCh: 1, misoCh: 2, csCh: 3, cpol: 0, cpha: 0, bitOrder: 'msb' },
+      }));
+      if (captureConfig.rateId < 6) {
+        setCaptureConfig((prev) => ({ ...prev, rateId: 7 }));
+      }
+    } else if (mode === 4) {
+      setSelectedFrameId(null);
+      setDecoderConfig((prev) => ({
+        ...prev,
+        kind: 'i2c',
+        i2c: { sclCh: 0, sdaCh: 1 },
+      }));
+      if (captureConfig.rateId < 5) {
+        setCaptureConfig((prev) => ({ ...prev, rateId: 6 }));
+      }
+    } else if (mode === 1 && decoderConfig.kind !== 'none') {
+      setSelectedFrameId(null);
+      setDecoderConfig((prev) => ({ ...prev, kind: 'none' }));
     }
   };
 
@@ -280,6 +329,13 @@ export const App: React.FC = () => {
   const handleAbortCapture = useCallback(() => {
     setContinuous(false);
     void transportRef.current?.writeBytes(buildLaAbortCmd());
+    if (abortWatchdogRef.current !== null) {
+      window.clearTimeout(abortWatchdogRef.current);
+    }
+    abortWatchdogRef.current = window.setTimeout(() => {
+      abortWatchdogRef.current = null;
+      setCapturing(false);
+    }, 350);
   }, []);
 
   const decodedFrames = useMemo<DecodedFrameAnnotation[]>(() => {
@@ -417,9 +473,9 @@ export const App: React.FC = () => {
     }
   }, []);
 
-  const hasWebSerial = typeof navigator !== 'undefined' && 'serial' in navigator && Boolean(navigator.serial);
-  const hasWebUSB = typeof navigator !== 'undefined' && 'usb' in navigator && Boolean(navigator.usb);
   const displayDeviceName = boardCaps?.board || snapshot.deviceName;
+  const hasActiveOutputs =
+    telemetry.forceEnableMask !== 0 || telemetry.contentionMask !== 0 || sigGenMode !== 0;
 
   return (
     <div className="app-shell">
@@ -428,11 +484,10 @@ export const App: React.FC = () => {
         transportKind={snapshot.transport}
         deviceName={displayDeviceName}
         errorMessage={snapshot.errorMessage}
-        hasWebSerial={hasWebSerial}
-        hasWebUSB={hasWebUSB}
         captureConfig={captureConfig}
         capturing={capturing}
         continuous={continuous}
+        hasActiveOutputs={hasActiveOutputs}
         sigGenMode={sigGenMode}
         decoderConfig={decoderConfig}
         hasCapture={Boolean(capture)}
