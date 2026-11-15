@@ -41,8 +41,8 @@ export const DEFAULT_DECODER_CONFIG: DecoderConfig = {
     bitOrder: 'msb',
   },
   i2c: {
-    sclCh: 0,
-    sdaCh: 1,
+    sclCh: 4,
+    sdaCh: 5,
   },
 };
 
