@@ -9,7 +9,6 @@ import {
   buildLaCaptureCmd,
   buildPinForceCmd,
   buildReleaseAllCmd,
-  buildSigGenCmd,
 } from './protocol/codec';
 import {
   DEFAULT_DECODER_CONFIG,
@@ -26,7 +25,6 @@ import {
   PinForceMode,
   PinPullMode,
   RATE_PRESETS,
-  SignalGenMode,
   StatusTelemetry,
   TYPE_BOARD_CAPABILITIES,
   TYPE_LA_CAPTURE_DATA,
@@ -91,7 +89,6 @@ export const App: React.FC = () => {
     createDefaultChannelConfigs
   );
   const [channelLabels, setChannelLabels] = useState<string[]>(loadChannelLabels);
-  const [sigGenMode, setSigGenMode] = useState<SignalGenMode>(0);
   const [decoderConfig, setDecoderConfig] = useState<DecoderConfig>(DEFAULT_DECODER_CONFIG);
   const [selectedFrameId, setSelectedFrameId] = useState<number | null>(null);
   const [captureConfig, setCaptureConfig] = useState<CaptureConfig>({
@@ -212,7 +209,6 @@ export const App: React.FC = () => {
       if (next.status !== 'connected') {
         demuxer.reset();
         setBoardCaps(null);
-        setSigGenMode(0);
         setCapturing(false);
         setContinuous(false);
         clearCaptureWatchdogs();
@@ -251,55 +247,14 @@ export const App: React.FC = () => {
   const handleDisconnect = () => {
     setContinuous(false);
     setCapturing(false);
-    setSigGenMode(0);
     setChannelConfigs(createDefaultChannelConfigs());
     setTelemetry(INITIAL_TELEMETRY);
     void transportRef.current?.disconnect();
   };
 
   const handleReleaseAll = () => {
-    setSigGenMode(0);
     setChannelConfigs(createDefaultChannelConfigs());
     void transportRef.current?.writeBytes(buildReleaseAllCmd());
-  };
-
-  const handleChangeSigGen = (mode: SignalGenMode) => {
-    setSigGenMode(mode);
-    void transportRef.current?.writeBytes(buildSigGenCmd(mode));
-    if (mode === 2) {
-      setSelectedFrameId(null);
-      setDecoderConfig((prev) => ({
-        ...prev,
-        kind: 'uart',
-        uart: { rxCh: 6, baud: 115200, invert: false },
-      }));
-      if (captureConfig.rateId < 5) {
-        setCaptureConfig((prev) => ({ ...prev, rateId: 6 }));
-      }
-    } else if (mode === 3) {
-      setSelectedFrameId(null);
-      setDecoderConfig((prev) => ({
-        ...prev,
-        kind: 'spi',
-        spi: { clkCh: 0, mosiCh: 1, misoCh: 2, csCh: 3, cpol: 0, cpha: 0, bitOrder: 'msb' },
-      }));
-      if (captureConfig.rateId < 6) {
-        setCaptureConfig((prev) => ({ ...prev, rateId: 7 }));
-      }
-    } else if (mode === 4) {
-      setSelectedFrameId(null);
-      setDecoderConfig((prev) => ({
-        ...prev,
-        kind: 'i2c',
-        i2c: { sclCh: 0, sdaCh: 1 },
-      }));
-      if (captureConfig.rateId < 5) {
-        setCaptureConfig((prev) => ({ ...prev, rateId: 6 }));
-      }
-    } else if (mode === 1 && decoderConfig.kind !== 'none') {
-      setSelectedFrameId(null);
-      setDecoderConfig((prev) => ({ ...prev, kind: 'none' }));
-    }
   };
 
   const handleRenameChannel = (ch: number, alias: string) => {
@@ -474,8 +429,7 @@ export const App: React.FC = () => {
   }, []);
 
   const displayDeviceName = boardCaps?.board || snapshot.deviceName;
-  const hasActiveOutputs =
-    telemetry.forceEnableMask !== 0 || telemetry.contentionMask !== 0 || sigGenMode !== 0;
+  const hasActiveOutputs = telemetry.forceEnableMask !== 0 || telemetry.contentionMask !== 0;
 
   return (
     <div className="app-shell">
@@ -488,7 +442,6 @@ export const App: React.FC = () => {
         capturing={capturing}
         continuous={continuous}
         hasActiveOutputs={hasActiveOutputs}
-        sigGenMode={sigGenMode}
         decoderConfig={decoderConfig}
         hasCapture={Boolean(capture)}
         channelLabels={channelLabels}
@@ -502,7 +455,6 @@ export const App: React.FC = () => {
         onAbort={handleAbortCapture}
         onToggleContinuous={handleToggleContinuous}
         onReleaseAll={handleReleaseAll}
-        onChangeSigGen={handleChangeSigGen}
         onUpdateDecoderConfig={(next) => {
           setSelectedFrameId(null);
           setDecoderConfig(next);

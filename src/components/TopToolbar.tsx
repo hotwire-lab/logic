@@ -6,8 +6,6 @@ import {
   DEPTH_PRESETS,
   PreTriggerRatio,
   RATE_PRESETS,
-  SIGNAL_GEN_PRESETS,
-  SignalGenMode,
   TriggerEdge,
 } from '../protocol/types';
 import { ConnectionStatus, TransportKind } from '../transport/SerialTransport';
@@ -31,7 +29,6 @@ interface TopToolbarProps {
   capturing: boolean;
   continuous: boolean;
   hasActiveOutputs: boolean;
-  sigGenMode: SignalGenMode;
   decoderConfig: DecoderConfig;
   hasCapture: boolean;
   channelLabels?: readonly string[];
@@ -43,7 +40,6 @@ interface TopToolbarProps {
   onAbort: () => void;
   onToggleContinuous: () => void;
   onReleaseAll: () => void;
-  onChangeSigGen: (mode: SignalGenMode) => void;
   onUpdateDecoderConfig: (next: DecoderConfig) => void;
   onExportCsv: () => void;
   onExportVcd: () => void;
@@ -58,7 +54,6 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
   capturing,
   continuous,
   hasActiveOutputs,
-  sigGenMode,
   decoderConfig,
   hasCapture,
   channelLabels,
@@ -70,7 +65,6 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
   onAbort,
   onToggleContinuous,
   onReleaseAll,
-  onChangeSigGen,
   onUpdateDecoderConfig,
   onExportCsv,
   onExportVcd,
@@ -148,7 +142,7 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
             className="btn btn-danger release-all-btn"
             disabled={!isConnected || !hasActiveOutputs}
             onClick={onReleaseAll}
-            title="Release all 8 channels (D0–D7) to High-Z Input (Z), stop generator, and clear contention flags"
+            title="Release all 8 channels (D0–D7) to High-Z Input (Z) and clear contention flags"
           >
             Release All (Z)
           </button>
@@ -271,29 +265,6 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
         </div>
 
         <div className="capture-control-group">
-          <label
-            className="ctrl-field"
-            title={
-              SIGNAL_GEN_PRESETS.find((p) => p.mode === sigGenMode)?.hint ??
-              'Built-in hardware pattern generator'
-            }
-          >
-            <span className="ctrl-label">Gen</span>
-            <select
-              aria-label="Built-in signal generator"
-              className="ctrl-select"
-              value={sigGenMode}
-              disabled={!isConnected}
-              onChange={(e) => onChangeSigGen(Number(e.target.value) as SignalGenMode)}
-            >
-              {SIGNAL_GEN_PRESETS.map((p) => (
-                <option key={p.mode} value={p.mode}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
-          </label>
-
           <label className="ctrl-field">
             <span className="ctrl-label">Decode</span>
             <select
