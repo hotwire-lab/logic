@@ -1,19 +1,22 @@
 /*
  * HotWire Pocket Lab — 8-Channel Logic Analyzer & Tri-State Force I/O Firmware
- * Target Board: Seeed Studio XIAO ESP32-S3
+ * Supported Target Boards:
+ *   - Seeed Studio XIAO ESP32-S3 (Dual-Core Xtensa 240 MHz)
+ *   - Seeed Studio XIAO ESP32-C6 (Single-Core RISC-V 160 MHz)
  *
  * Required Arduino IDE Tools Settings:
- *   - Board: "XIAO_ESP32S3" (Seeed Studio XIAO ESP32S3)
- *   - USB CDC On Boot: "Enabled"
- *   - CPU Frequency: "240MHz (WiFi)"
- *   - USB Mode: "Hardware CDC and JTAG" (or "USB-OTG (TinyUSB)")
+ *   XIAO ESP32-S3:
+ *     - Board: "XIAO_ESP32S3" (Seeed Studio XIAO ESP32S3)
+ *     - USB CDC On Boot: "Enabled"
+ *     - CPU Frequency: "240MHz (WiFi)"
+ *     - USB Mode: "Hardware CDC and JTAG" (or "USB-OTG (TinyUSB)")
+ *     Pin Mapping (D0..D7): GPIO { 1, 2, 3, 4, 5, 6, 43, 44 }
  *
- * Pin Mapping (CH0..CH7 -> D0..D7):
- *   CH0 -> D0 (GPIO 1)  | CH4 -> D4 (GPIO 5)
- *   CH1 -> D1 (GPIO 2)  | CH5 -> D5 (GPIO 6)
- *   CH2 -> D2 (GPIO 3)  | CH6 -> D6 (GPIO 43)
- *   CH3 -> D3 (GPIO 4)  | CH7 -> D7 (GPIO 44)
- *   Internal USB pins (GPIO 19, GPIO 20) are strictly untouched.
+ *   XIAO ESP32-C6:
+ *     - Board: "XIAO_ESP32C6" (Seeed Studio XIAO ESP32C6)
+ *     - USB CDC On Boot: "Enabled"
+ *     - CPU Frequency: "160MHz (WiFi)"
+ *     Pin Mapping (D0..D7): GPIO { 0, 1, 2, 21, 22, 23, 16, 17 }
  */
 
 #include <Arduino.h>
@@ -21,7 +24,12 @@
 #include "driver/dedic_gpio.h"
 #include "hal/dedic_gpio_cpu_ll.h"
 #include "soc/gpio_struct.h"
-#include "soc/rtc_cntl_reg.h"
+#include "soc/soc_caps.h"
+#if CONFIG_IDF_TARGET_ESP32C6
+  #include "soc/lp_aon_reg.h"
+#else
+  #include "soc/rtc_cntl_reg.h"
+#endif
 #include "esp_cpu.h"
 #include "esp_system.h"
 #include "esp_timer.h"
@@ -33,12 +41,21 @@
 // Hardware Constants & Channel Mapping
 // -----------------------------------------------------------------------------
 
+#define HOTWIRE_FW_VERSION "1.2.0"
+
 static const uint8_t CHANNEL_COUNT = 8;
-static const uint8_t CHANNEL_PINS[CHANNEL_COUNT] = { 1, 2, 3, 4, 5, 6, 43, 44 };
+#if CONFIG_IDF_TARGET_ESP32C6
+  static const char* const BOARD_NAME = "XIAO-ESP32-C6";
+  static const uint8_t CHANNEL_PINS[CHANNEL_COUNT] = { 0, 1, 2, 21, 22, 23, 16, 17 };
+  static const uint32_t CPU_FREQ_HZ = 160000000UL;
+#else
+  static const char* const BOARD_NAME = "XIAO-ESP32-S3";
+  static const uint8_t CHANNEL_PINS[CHANNEL_COUNT] = { 1, 2, 3, 4, 5, 6, 43, 44 };
+  static const uint32_t CPU_FREQ_HZ = 240000000UL;
+#endif
 static const char* const CHANNEL_LABELS[CHANNEL_COUNT] = { "D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7" };
 
 static const uint32_t MAX_SAMPLES = 32768;
-static const uint32_t CPU_FREQ_HZ = 240000000UL;
 static const uint64_t CONTENTION_CUTOFF_US = 20000ULL;      // 20 ms short-circuit guard
 static const uint64_t TELEMETRY_INTERVAL_US = 40000ULL;     // 25 Hz idle telemetry
 static const uint64_t CHANGE_THROTTLE_US = 4000ULL;         // Max 250 Hz for physical-only changes
@@ -136,13 +153,27 @@ static uint32_t dedicInOffset = 0;
 // -----------------------------------------------------------------------------
 
 static inline uint8_t IRAM_ATTR readAllChannelsFast() {
+#if CONFIG_IDF_TARGET_ESP32C6
+  // XIAO ESP32-C6 D0..D7 -> GPIO {0, 1, 2, 21, 22, 23, 16, 17}
+  const uint32_t inVal = GPIO.in.val;
+  return (uint8_t)(
+    (inVal & 0x07U) |
+    ((inVal >> 18) & 0x38U) |
+    ((inVal >> 10) & 0xC0U)
+  );
+#else
+  // XIAO ESP32-S3 D0..D7 -> GPIO {1, 2, 3, 4, 5, 6, 43, 44}
   uint32_t low = (GPIO.in >> 1) & 0x3FU;
   uint32_t high = ((GPIO.in1.val >> 11) & 0x03U) << 6;
   return (uint8_t)(low | high);
+#endif
 }
 
 static void initCore1DedicGpio() {
-  static const int gpioArray[CHANNEL_COUNT] = { 1, 2, 3, 4, 5, 6, 43, 44 };
+  int gpioArray[CHANNEL_COUNT];
+  for (uint8_t i = 0; i < CHANNEL_COUNT; i++) {
+    gpioArray[i] = CHANNEL_PINS[i];
+  }
   dedic_gpio_bundle_config_t bundleCfg = {
     .gpio_array = gpioArray,
     .array_size = CHANNEL_COUNT,
@@ -163,7 +194,15 @@ static void initCore1DedicGpio() {
   }
 }
 
-static inline void preloadOutputLatch(uint8_t pin, uint8_t level) {
+static inline void IRAM_ATTR preloadOutputLatch(uint8_t pin, uint8_t level) {
+#if CONFIG_IDF_TARGET_ESP32C6
+  const uint32_t bit = (1UL << pin);
+  if (level) {
+    GPIO.out_w1ts.val = bit;
+  } else {
+    GPIO.out_w1tc.val = bit;
+  }
+#else
   if (pin < 32) {
     if (level) {
       GPIO.out_w1ts = (1UL << pin);
@@ -178,6 +217,7 @@ static inline void preloadOutputLatch(uint8_t pin, uint8_t level) {
       GPIO.out1_w1tc.val = bit;
     }
   }
+#endif
 }
 
 static void applyChannelHardware(uint8_t ch, uint8_t mode, uint8_t pull) {
@@ -331,8 +371,23 @@ static void sendTelemetryFrame() {
 }
 
 static void sendCapabilitiesFrame() {
+#if CONFIG_IDF_TARGET_ESP32C6
   static const char CAPS_JSON[] =
-    "{\"board\":\"XIAO-ESP32-S3\",\"firmware\":\"1.1.0\",\"channels\":8,"
+    "{\"board\":\"XIAO-ESP32-C6\",\"firmware\":\"" HOTWIRE_FW_VERSION "\",\"channels\":8,"
+    "\"maxRateHz\":20000000,\"maxDepth\":32768,"
+    "\"pins\":["
+    "{\"ch\":0,\"label\":\"D0\",\"gpio\":0},"
+    "{\"ch\":1,\"label\":\"D1\",\"gpio\":1},"
+    "{\"ch\":2,\"label\":\"D2\",\"gpio\":2},"
+    "{\"ch\":3,\"label\":\"D3\",\"gpio\":21},"
+    "{\"ch\":4,\"label\":\"D4\",\"gpio\":22},"
+    "{\"ch\":5,\"label\":\"D5\",\"gpio\":23},"
+    "{\"ch\":6,\"label\":\"D6\",\"gpio\":16},"
+    "{\"ch\":7,\"label\":\"D7\",\"gpio\":17}"
+    "]}";
+#else
+  static const char CAPS_JSON[] =
+    "{\"board\":\"XIAO-ESP32-S3\",\"firmware\":\"" HOTWIRE_FW_VERSION "\",\"channels\":8,"
     "\"maxRateHz\":20000000,\"maxDepth\":32768,"
     "\"pins\":["
     "{\"ch\":0,\"label\":\"D0\",\"gpio\":1},"
@@ -344,6 +399,7 @@ static void sendCapabilitiesFrame() {
     "{\"ch\":6,\"label\":\"D6\",\"gpio\":43},"
     "{\"ch\":7,\"label\":\"D7\",\"gpio\":44}"
     "]}";
+#endif
   sendBinaryFrame(TYPE_BOARD_CAPABILITIES, (const uint8_t*)CAPS_JSON, (uint16_t)(sizeof(CAPS_JSON) - 1));
 }
 
@@ -389,6 +445,151 @@ static void IRAM_ATTR linearizeRingBuffer(
   }
 }
 
+#if SOC_CPU_CORES_NUM == 1
+static volatile bool inlineCaptureBusy = false;
+static uint8_t inlineCounterLut[64];
+static uint8_t inlineUartLut[128];
+static uint8_t inlineSpiLut[128];
+static uint8_t inlineI2cLut[256];
+
+static void initInlineSigGenTables() {
+  // Mode 1: 4-bit counter (D0..D3) + 25%/75% PWM (D4/D5) at 200 kHz steps
+  for (uint8_t step = 0; step < 64; step++) {
+    uint8_t val = (uint8_t)(step & 0x0FU);
+    if ((step & 3U) == 0U) val |= 0x10U;
+    if ((step & 3U) != 3U) val |= 0x20U;
+    inlineCounterLut[step] = val;
+  }
+
+  // Mode 2: UART 115200 8N1 "HotWire!\r\n" on D6 (0x40), idle HIGH
+  static const char msg[] = "HotWire!\r\n";
+  for (uint8_t i = 0; i < 128; i++) {
+    inlineUartLut[i] = 0x40U;
+  }
+  for (uint8_t c = 0; c < 10; c++) {
+    const uint8_t b = (uint8_t)msg[c];
+    const uint8_t base = (uint8_t)(16U + c * 10U);
+    inlineUartLut[base] = 0x00U; // Start bit
+    for (uint8_t bit = 0; bit < 8; bit++) {
+      inlineUartLut[base + 1U + bit] = ((b >> bit) & 1U) ? 0x40U : 0x00U;
+    }
+    inlineUartLut[base + 9U] = 0x40U; // Stop bit
+  }
+
+  // Mode 3: SPI burst {0xA5, 0x5A, 0x48, 0x57}/{0x11, 0x22, 0x33, 0x44}
+  // D0=SCK(0x01), D1=MOSI(0x02), D2=MISO(0x04), D3=CS#(0x08) at 500 kHz half-clock
+  static const uint8_t mosi[4] = { 0xA5, 0x5A, 0x48, 0x57 };
+  static const uint8_t miso[4] = { 0x11, 0x22, 0x33, 0x44 };
+  for (uint8_t i = 0; i < 128; i++) {
+    inlineSpiLut[i] = 0x08U; // CS# idle high, SCK low
+  }
+  inlineSpiLut[16] = 0x00U; // CS# active low
+  inlineSpiLut[17] = 0x00U;
+  for (uint8_t idx = 0; idx < 4; idx++) {
+    for (uint8_t bit = 0; bit < 8; bit++) {
+      const uint8_t shift = (uint8_t)(7U - bit);
+      const uint8_t slot = (uint8_t)(18U + (idx * 8U + bit) * 2U);
+      const uint8_t dataBits = (uint8_t)(
+        (((mosi[idx] >> shift) & 1U) ? 0x02U : 0x00U) |
+        (((miso[idx] >> shift) & 1U) ? 0x04U : 0x00U)
+      );
+      inlineSpiLut[slot] = dataBits;            // SCK low
+      inlineSpiLut[slot + 1U] = dataBits | 0x01U; // SCK high
+    }
+  }
+  inlineSpiLut[82] = 0x00U;
+  inlineSpiLut[83] = 0x00U;
+
+  // Mode 4: I2C burst Write 0x3C -> 0x00, 0xAE, 0xAF
+  // D0=SCL(0x01), D1=SDA(0x02) at 400 kHz quarter-bit (~100 kHz SCL)
+  static const uint8_t i2cBytes[4] = { (uint8_t)(0x3C << 1), 0x00, 0xAE, 0xAF };
+  for (uint16_t i = 0; i < 256; i++) {
+    inlineI2cLut[i] = 0x03U; // SCL=1, SDA=1 idle
+  }
+  inlineI2cLut[24] = 0x01U; // START: SDA=0 while SCL=1
+  inlineI2cLut[25] = 0x01U;
+  inlineI2cLut[26] = 0x00U;
+  uint16_t s = 27;
+  for (uint8_t idx = 0; idx < 4; idx++) {
+    for (uint8_t bit = 0; bit < 9; bit++) {
+      const uint8_t sdaVal = (bit < 8)
+        ? (((i2cBytes[idx] >> (7U - bit)) & 1U) ? 0x02U : 0x00U)
+        : 0x00U; // ACK = 0
+      inlineI2cLut[s++] = sdaVal;
+      inlineI2cLut[s++] = (uint8_t)(sdaVal | 0x01U);
+      inlineI2cLut[s++] = (uint8_t)(sdaVal | 0x01U);
+      inlineI2cLut[s++] = sdaVal;
+    }
+  }
+  inlineI2cLut[s++] = 0x00U; // STOP: SCL=0, SDA=0
+  inlineI2cLut[s++] = 0x01U; // SCL=1, SDA=0
+  inlineI2cLut[s++] = 0x01U; // SCL=1, SDA=0
+  inlineI2cLut[s++] = 0x03U; // SCL=1, SDA=1
+}
+
+static inline uint32_t IRAM_ATTR chMaskToGpioMask(uint8_t chBits) {
+#if CONFIG_IDF_TARGET_ESP32C6
+  return (uint32_t)(chBits & 0x07U)
+       | ((uint32_t)(chBits & 0x38U) << 18)
+       | ((uint32_t)(chBits & 0xC0U) << 10);
+#else
+  return ((uint32_t)(chBits & 0x3FU) << 1);
+#endif
+}
+
+struct InlineSigGenCtx {
+  const uint8_t* lut;
+  uint32_t lutMask;
+  uint32_t phase;
+  uint32_t phaseInc;
+  uint32_t lastIdx;
+  uint8_t chMask;
+  uint32_t gpioMask;
+};
+
+static InlineSigGenCtx IRAM_ATTR prepareInlineSigGen(uint8_t mode, uint8_t pinMask, uint32_t rateHz) {
+  InlineSigGenCtx ctx = { nullptr, 0, 0, 0, 0xFFFFFFFFU, pinMask, chMaskToGpioMask(pinMask) };
+  if (pinMask == 0) {
+    return ctx;
+  }
+  if (mode == 1) {
+    ctx.lut = inlineCounterLut;
+    ctx.lutMask = 63U;
+    ctx.phaseInc = (uint32_t)((200000ULL << 16) / rateHz);
+  } else if (mode == 2) {
+    ctx.lut = inlineUartLut;
+    ctx.lutMask = 127U;
+    ctx.phaseInc = (uint32_t)((115200ULL << 16) / rateHz);
+  } else if (mode == 3) {
+    ctx.lut = inlineSpiLut;
+    ctx.lutMask = 127U;
+    ctx.phaseInc = (uint32_t)((500000ULL << 16) / rateHz);
+  } else if (mode == 4) {
+    ctx.lut = inlineI2cLut;
+    ctx.lutMask = 255U;
+    ctx.phaseInc = (uint32_t)((400000ULL << 16) / rateHz);
+  }
+  return ctx;
+}
+
+static inline void IRAM_ATTR stepInlineSigGen(InlineSigGenCtx& ctx) {
+  const uint32_t idx = (ctx.phase >> 16) & ctx.lutMask;
+  ctx.phase += ctx.phaseInc;
+  if (idx != ctx.lastIdx) {
+    ctx.lastIdx = idx;
+    const uint8_t chVal = ctx.lut[idx] & ctx.chMask;
+    const uint32_t highGpio = chMaskToGpioMask(chVal);
+#if CONFIG_IDF_TARGET_ESP32C6
+    GPIO.out_w1ts.val = highGpio;
+    GPIO.out_w1tc.val = ctx.gpioMask & (~highGpio);
+#else
+    GPIO.out_w1ts = highGpio;
+    GPIO.out_w1tc = ctx.gpioMask & (~highGpio);
+#endif
+  }
+}
+#endif
+
 static void IRAM_ATTR executeHighSpeedCapture(
   uint32_t rateHz,
   uint8_t trigCh,
@@ -405,6 +606,14 @@ static void IRAM_ATTR executeHighSpeedCapture(
   uint16_t flags = 0;
   uint16_t trigIndex = 0;
 
+#if SOC_CPU_CORES_NUM == 1
+  InlineSigGenCtx sigCtx = prepareInlineSigGen(sigGenMode, sigGenPinMask, rateHz);
+  if (sigCtx.lut != nullptr) {
+    inlineCaptureBusy = true;
+    stepInlineSigGen(sigCtx);
+  }
+#endif
+
   portENTER_CRITICAL(&laSpinlock);
 
   const bool useDedic = dedicGpioReady && (dedicInOffset == 0);
@@ -413,6 +622,19 @@ static void IRAM_ATTR executeHighSpeedCapture(
     // Free-Run / Immediate capture
     uint32_t startCycle = esp_cpu_get_cycle_count();
     uint32_t nextCycle = startCycle;
+#if SOC_CPU_CORES_NUM == 1
+    if (sigCtx.lut != nullptr) {
+      nextCycle += (cyclesPerSample > 16U ? cyclesPerSample : 16U);
+      startCycle = nextCycle;
+      for (uint32_t i = 0; i < totalSamples; i++) {
+        while ((int32_t)(esp_cpu_get_cycle_count() - nextCycle) < 0) {
+        }
+        captureBuffer[i] = useDedic ? (uint8_t)dedic_gpio_cpu_ll_read_in() : readAllChannelsFast();
+        stepInlineSigGen(sigCtx);
+        nextCycle += cyclesPerSample;
+      }
+    } else
+#endif
     if (useDedic) {
       for (uint32_t i = 0; i < totalSamples; i++) {
         while ((int32_t)(esp_cpu_get_cycle_count() - nextCycle) < 0) {
@@ -430,6 +652,10 @@ static void IRAM_ATTR executeHighSpeedCapture(
     }
     uint32_t elapsedCycles = esp_cpu_get_cycle_count() - startCycle;
     portEXIT_CRITICAL(&laSpinlock);
+#if SOC_CPU_CORES_NUM == 1
+    inlineCaptureBusy = false;
+    vTaskDelay(2);
+#endif
 
     *outSamples = totalSamples;
     *outTrigIndex = 0;
@@ -452,12 +678,22 @@ static void IRAM_ATTR executeHighSpeedCapture(
   const uint8_t trigMask = (uint8_t)(1U << trigCh);
   uint32_t writeIdx = 0;
   uint32_t nextCycle = esp_cpu_get_cycle_count();
+#if SOC_CPU_CORES_NUM == 1
+  if (sigCtx.lut != nullptr) {
+    nextCycle += (cyclesPerSample > 16U ? cyclesPerSample : 16U);
+  }
+#endif
 
   // Phase 1: Collect mandatory pre-trigger samples before arming edge detector
   for (uint32_t i = 0; i < preTrigSamples; i++) {
     while ((int32_t)(esp_cpu_get_cycle_count() - nextCycle) < 0) {
     }
     ringBuf[writeIdx] = useDedic ? (uint8_t)dedic_gpio_cpu_ll_read_in() : readAllChannelsFast();
+#if SOC_CPU_CORES_NUM == 1
+    if (sigCtx.lut != nullptr) {
+      stepInlineSigGen(sigCtx);
+    }
+#endif
     writeIdx = (writeIdx + 1U) & (MAX_SAMPLES - 1U);
     nextCycle += cyclesPerSample;
   }
@@ -475,6 +711,11 @@ static void IRAM_ATTR executeHighSpeedCapture(
     while ((int32_t)(esp_cpu_get_cycle_count() - nextCycle) < 0) {
     }
     uint8_t curSample = useDedic ? (uint8_t)dedic_gpio_cpu_ll_read_in() : readAllChannelsFast();
+#if SOC_CPU_CORES_NUM == 1
+    if (sigCtx.lut != nullptr) {
+      stepInlineSigGen(sigCtx);
+    }
+#endif
     ringBuf[writeIdx] = curSample;
     trigRingPos = writeIdx;
     writeIdx = (writeIdx + 1U) & (MAX_SAMPLES - 1U);
@@ -498,6 +739,18 @@ static void IRAM_ATTR executeHighSpeedCapture(
     ? (totalSamples - preTrigSamples - 1U)
     : 0U;
   uint32_t postStartCycle = esp_cpu_get_cycle_count();
+#if SOC_CPU_CORES_NUM == 1
+  if (sigCtx.lut != nullptr) {
+    for (uint32_t i = 0; i < postRemaining; i++) {
+      while ((int32_t)(esp_cpu_get_cycle_count() - nextCycle) < 0) {
+      }
+      ringBuf[writeIdx] = useDedic ? (uint8_t)dedic_gpio_cpu_ll_read_in() : readAllChannelsFast();
+      stepInlineSigGen(sigCtx);
+      writeIdx = (writeIdx + 1U) & (MAX_SAMPLES - 1U);
+      nextCycle += cyclesPerSample;
+    }
+  } else
+#endif
   if (useDedic) {
     for (uint32_t i = 0; i < postRemaining; i++) {
       while ((int32_t)(esp_cpu_get_cycle_count() - nextCycle) < 0) {
@@ -522,6 +775,10 @@ static void IRAM_ATTR executeHighSpeedCapture(
   (void)triggered;
 
   portEXIT_CRITICAL(&laSpinlock);
+#if SOC_CPU_CORES_NUM == 1
+  inlineCaptureBusy = false;
+  vTaskDelay(2);
+#endif
 
   *outSamples = totalSamples;
   *outTrigIndex = trigIndex;
@@ -536,6 +793,29 @@ static void IRAM_ATTR executeHighSpeedCapture(
   } else {
     *outActualRateHz = rateHz;
   }
+}
+
+static bool lowSpeedWaitSample(uint64_t nextSampleUs, uint64_t intervalUs, uint64_t* lastYieldUs) {
+  uint64_t nowUs = (uint64_t)esp_timer_get_time();
+  if (nextSampleUs > nowUs) {
+    uint64_t rem = nextSampleUs - nowUs;
+    if (rem >= 2000ULL || (intervalUs >= 1000ULL && rem >= 900ULL)) {
+      vTaskDelay(1);
+      *lastYieldUs = (uint64_t)esp_timer_get_time();
+    } else if ((nowUs - *lastYieldUs) >= 1500000ULL) {
+      vTaskDelay(1);
+      *lastYieldUs = (uint64_t)esp_timer_get_time();
+    }
+    while ((uint64_t)esp_timer_get_time() < nextSampleUs) {
+      if (laAbortRequested) {
+        return false;
+      }
+    }
+  } else if ((nowUs - *lastYieldUs) >= 1500000ULL) {
+    vTaskDelay(1);
+    *lastYieldUs = (uint64_t)esp_timer_get_time();
+  }
+  return !laAbortRequested;
 }
 
 static void executeLowSpeedCapture(
@@ -553,35 +833,36 @@ static void executeLowSpeedCapture(
   uint16_t flags = 0;
   uint16_t trigIndex = 0;
   uint64_t nextSampleUs = (uint64_t)esp_timer_get_time();
+  uint64_t lastYieldUs = nextSampleUs;
+
+#if SOC_CPU_CORES_NUM == 1
+  InlineSigGenCtx sigCtx = prepareInlineSigGen(sigGenMode, sigGenPinMask, rateHz);
+  if (sigCtx.lut != nullptr) {
+    inlineCaptureBusy = true;
+    stepInlineSigGen(sigCtx);
+  }
+#endif
 
   if (trigCh >= CHANNEL_COUNT) {
     // Free-Run low-speed capture (interrupts enabled, abortable)
     uint32_t collected = 0;
     for (uint32_t i = 0; i < totalSamples; i++) {
-      if (laAbortRequested) {
-        flags |= LA_FLAG_ABORTED_EARLY;
-        break;
-      }
-      uint64_t nowUs = (uint64_t)esp_timer_get_time();
-      if (nextSampleUs > nowUs) {
-        uint64_t rem = nextSampleUs - nowUs;
-        if (rem >= 2000ULL || (intervalUs >= 1000ULL && rem >= 1000ULL)) {
-          vTaskDelay(1);
-        }
-        while ((uint64_t)esp_timer_get_time() < nextSampleUs) {
-          if (laAbortRequested) {
-            break;
-          }
-        }
-      }
-      if (laAbortRequested) {
+      if (!lowSpeedWaitSample(nextSampleUs, intervalUs, &lastYieldUs)) {
         flags |= LA_FLAG_ABORTED_EARLY;
         break;
       }
       captureBuffer[collected++] = readAllChannelsFast();
+#if SOC_CPU_CORES_NUM == 1
+      if (sigCtx.lut != nullptr) {
+        stepInlineSigGen(sigCtx);
+      }
+#endif
       nextSampleUs += intervalUs;
     }
 
+#if SOC_CPU_CORES_NUM == 1
+    inlineCaptureBusy = false;
+#endif
     *outSamples = collected;
     *outTrigIndex = 0;
     *outFlags = flags;
@@ -596,28 +877,26 @@ static void executeLowSpeedCapture(
 
   // Phase 1: Fill pre-trigger ring buffer
   for (uint32_t i = 0; i < preTrigSamples; i++) {
-    if (laAbortRequested) {
+    if (!lowSpeedWaitSample(nextSampleUs, intervalUs, &lastYieldUs)) {
       flags |= LA_FLAG_ABORTED_EARLY;
       for (uint32_t k = 0; k < collectedRing; k++) {
         captureBuffer[k] = ringBuf[k];
       }
+#if SOC_CPU_CORES_NUM == 1
+      inlineCaptureBusy = false;
+#endif
       *outSamples = collectedRing;
       *outTrigIndex = 0;
       *outFlags = flags;
       *outActualRateHz = rateHz;
       return;
     }
-    uint64_t nowUs = (uint64_t)esp_timer_get_time();
-    if (nextSampleUs > nowUs) {
-      uint64_t rem = nextSampleUs - nowUs;
-      if (rem >= 2000ULL || (intervalUs >= 1000ULL && rem >= 1000ULL)) {
-        vTaskDelay(1);
-      }
-      while ((uint64_t)esp_timer_get_time() < nextSampleUs) {
-        if (laAbortRequested) break;
-      }
-    }
     ringBuf[writeIdx] = readAllChannelsFast();
+#if SOC_CPU_CORES_NUM == 1
+    if (sigCtx.lut != nullptr) {
+      stepInlineSigGen(sigCtx);
+    }
+#endif
     writeIdx = (writeIdx + 1U) & (MAX_SAMPLES - 1U);
     collectedRing++;
     nextSampleUs += intervalUs;
@@ -633,28 +912,18 @@ static void executeLowSpeedCapture(
   bool abortedInWait = false;
 
   while (true) {
-    if (laAbortRequested) {
-      flags |= LA_FLAG_ABORTED_EARLY;
-      abortedInWait = true;
-      break;
-    }
-    uint64_t nowUs = (uint64_t)esp_timer_get_time();
-    if (nextSampleUs > nowUs) {
-      uint64_t rem = nextSampleUs - nowUs;
-      if (rem >= 2000ULL || (intervalUs >= 1000ULL && rem >= 1000ULL)) {
-        vTaskDelay(1);
-      }
-      while ((uint64_t)esp_timer_get_time() < nextSampleUs) {
-        if (laAbortRequested) break;
-      }
-    }
-    if (laAbortRequested) {
+    if (!lowSpeedWaitSample(nextSampleUs, intervalUs, &lastYieldUs)) {
       flags |= LA_FLAG_ABORTED_EARLY;
       abortedInWait = true;
       break;
     }
 
     uint8_t curSample = readAllChannelsFast();
+#if SOC_CPU_CORES_NUM == 1
+    if (sigCtx.lut != nullptr) {
+      stepInlineSigGen(sigCtx);
+    }
+#endif
     ringBuf[writeIdx] = curSample;
     trigRingPos = writeIdx;
     writeIdx = (writeIdx + 1U) & (MAX_SAMPLES - 1U);
@@ -681,6 +950,9 @@ static void executeLowSpeedCapture(
     for (uint32_t i = 0; i < count; i++) {
       captureBuffer[i] = ringBuf[(startPos + i) & (MAX_SAMPLES - 1U)];
     }
+#if SOC_CPU_CORES_NUM == 1
+    inlineCaptureBusy = false;
+#endif
     *outSamples = count;
     *outTrigIndex = 0;
     *outFlags = flags;
@@ -694,29 +966,24 @@ static void executeLowSpeedCapture(
     : 0U;
   uint32_t postCollected = 0;
   for (uint32_t i = 0; i < postTarget; i++) {
-    if (laAbortRequested) {
-      flags |= LA_FLAG_ABORTED_EARLY;
-      break;
-    }
-    uint64_t nowUs = (uint64_t)esp_timer_get_time();
-    if (nextSampleUs > nowUs) {
-      uint64_t rem = nextSampleUs - nowUs;
-      if (rem >= 2000ULL || (intervalUs >= 1000ULL && rem >= 1000ULL)) {
-        vTaskDelay(1);
-      }
-      while ((uint64_t)esp_timer_get_time() < nextSampleUs) {
-        if (laAbortRequested) break;
-      }
-    }
-    if (laAbortRequested) {
+    if (!lowSpeedWaitSample(nextSampleUs, intervalUs, &lastYieldUs)) {
       flags |= LA_FLAG_ABORTED_EARLY;
       break;
     }
     ringBuf[writeIdx] = readAllChannelsFast();
+#if SOC_CPU_CORES_NUM == 1
+    if (sigCtx.lut != nullptr) {
+      stepInlineSigGen(sigCtx);
+    }
+#endif
     writeIdx = (writeIdx + 1U) & (MAX_SAMPLES - 1U);
     postCollected++;
     nextSampleUs += intervalUs;
   }
+
+#if SOC_CPU_CORES_NUM == 1
+  inlineCaptureBusy = false;
+#endif
 
   linearizeRingBuffer(trigRingPos, preTrigSamples, postCollected + 1U);
   trigIndex = (uint16_t)preTrigSamples;
@@ -923,7 +1190,11 @@ static void handleBatchForceCmd(uint8_t enableMask, uint8_t levelMask, uint8_t p
 static void handleEnterBootloader() {
   releaseAllChannels();
   sendTelemetryFrame();
+#if CONFIG_IDF_TARGET_ESP32C6
+  sendTextLocked("\r\n[HotWire] Entering ESP32-C6 ROM Download Bootloader...\r\n");
+#else
   sendTextLocked("\r\n[HotWire] Entering ESP32-S3 ROM Download Bootloader...\r\n");
+#endif
   if (txMutex) {
     xSemaphoreTake(txMutex, portMAX_DELAY);
   }
@@ -932,7 +1203,11 @@ static void handleEnterBootloader() {
     xSemaphoreGive(txMutex);
   }
   vTaskDelay(pdMS_TO_TICKS(50));
+#if CONFIG_IDF_TARGET_ESP32C6
+  REG_SET_BIT(LP_AON_SYS_CFG_REG, LP_AON_FORCE_DOWNLOAD_BOOT);
+#else
   REG_SET_BIT(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
+#endif
   esp_restart();
 }
 
@@ -1138,6 +1413,12 @@ static void emitSigGenI2cBurst() {
 static void SigGen_Core0_Task(void* arg) {
   (void)arg;
   for (;;) {
+#if SOC_CPU_CORES_NUM == 1
+    if (inlineCaptureBusy) {
+      vTaskDelay(1);
+      continue;
+    }
+#endif
     const uint8_t mode = sigGenMode;
     switch (mode) {
       case 1: emitSigGenCounterPwm(); break;
@@ -1209,7 +1490,7 @@ static void dispatchBinaryCommand(const uint8_t cmd[8]) {
 static void handleAsciiLine(const char* line) {
   if (strcmp(line, "help") == 0) {
     sendTextLocked(
-      "\r\nHotWire XIAO ESP32-S3 Commands:\r\n"
+      "\r\nHotWire Commands:\r\n"
       "  help     - Show this command list\r\n"
       "  status   - Print live pin states and contention status\r\n"
       "  pins     - Show D0..D7 GPIO mapping\r\n"
@@ -1218,12 +1499,23 @@ static void handleAsciiLine(const char* line) {
       "  version  - Show firmware version\r\n"
     );
   } else if (strcmp(line, "version") == 0) {
-    sendTextLocked("\r\nHotWire-XIAO-ESP32S3 v1.1.0 (20 MHz 8-ch LA + Tri-State Force I/O + SigGen)\r\n");
+#if CONFIG_IDF_TARGET_ESP32C6
+    sendTextLocked("\r\nHotWire-XIAO-ESP32C6 v" HOTWIRE_FW_VERSION " (20 MHz 8-ch LA + Tri-State Force I/O + SigGen)\r\n");
+#else
+    sendTextLocked("\r\nHotWire-XIAO-ESP32S3 v" HOTWIRE_FW_VERSION " (20 MHz 8-ch LA + Tri-State Force I/O + SigGen)\r\n");
+#endif
   } else if (strcmp(line, "pins") == 0) {
+#if CONFIG_IDF_TARGET_ESP32C6
+    sendTextLocked(
+      "\r\nCH0=D0(GPIO0) CH1=D1(GPIO1) CH2=D2(GPIO2) CH3=D3(GPIO21)\r\n"
+      "CH4=D4(GPIO22) CH5=D5(GPIO23) CH6=D6(GPIO16) CH7=D7(GPIO17)\r\n"
+    );
+#else
     sendTextLocked(
       "\r\nCH0=D0(GPIO1) CH1=D1(GPIO2) CH2=D2(GPIO3) CH3=D3(GPIO4)\r\n"
       "CH4=D4(GPIO5) CH5=D5(GPIO6) CH6=D6(GPIO43) CH7=D7(GPIO44)\r\n"
     );
+#endif
   } else if (strcmp(line, "release") == 0) {
     releaseAllChannels();
     sendTextLocked("\r\n[HotWire] All channels D0..D7 released to Z.\r\n");
@@ -1405,7 +1697,14 @@ static void Protocol_Core0_Task(void* arg) {
 // -----------------------------------------------------------------------------
 
 void setup() {
+#if CONFIG_IDF_TARGET_ESP32C6
+  REG_CLR_BIT(LP_AON_SYS_CFG_REG, LP_AON_FORCE_DOWNLOAD_BOOT);
+#else
   REG_CLR_BIT(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
+#endif
+#if SOC_CPU_CORES_NUM == 1
+  initInlineSigGenTables();
+#endif
   stateMutex = xSemaphoreCreateMutex();
   txMutex = xSemaphoreCreateMutex();
 
@@ -1415,21 +1714,22 @@ void setup() {
   }
 
 #if ARDUINO_USB_MODE == 1
-  Serial.setTxBufferSize(4096);
+  Serial.setTxBufferSize(36864);
   Serial.setRxBufferSize(1024);
 #else
   Serial.setRxBufferSize(1024);
 #endif
   Serial.begin(115200);
 
+  static const BaseType_t LA_CAPTURE_CORE = (SOC_CPU_CORES_NUM > 1) ? 1 : 0;
   xTaskCreatePinnedToCore(
     LA_Capture_Core1,
-    "LA_Capture_Core1",
+    "LA_Capture",
     4096,
     nullptr,
     configMAX_PRIORITIES - 1,
     &core1TaskHandle,
-    1
+    LA_CAPTURE_CORE
   );
 
   xTaskCreatePinnedToCore(

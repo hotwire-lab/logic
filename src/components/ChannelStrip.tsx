@@ -1,5 +1,11 @@
 import React, { useRef, useState } from 'react';
-import { CHANNELS, PinForceMode, PinPullMode, StatusTelemetry } from '../protocol/types';
+import {
+  BoardCapabilities,
+  CHANNELS,
+  PinForceMode,
+  PinPullMode,
+  StatusTelemetry,
+} from '../protocol/types';
 
 export interface ChannelUiState {
   mode: PinForceMode;
@@ -12,6 +18,7 @@ interface ChannelStripProps {
   telemetry: StatusTelemetry;
   channelConfigs: ChannelUiState[];
   channelLabels?: readonly string[];
+  boardPins?: BoardCapabilities['pins'];
   onForceChannel: (ch: number, mode: PinForceMode, pull: PinPullMode, protect?: boolean) => void;
   onRenameChannel?: (ch: number, alias: string) => void;
 }
@@ -21,6 +28,7 @@ export const ChannelStrip: React.FC<ChannelStripProps> = ({
   telemetry,
   channelConfigs,
   channelLabels,
+  boardPins,
   onForceChannel,
   onRenameChannel,
 }) => {
@@ -80,6 +88,7 @@ export const ChannelStrip: React.FC<ChannelStripProps> = ({
       <div className="channel-rows">
         {CHANNELS.map((meta) => {
           const bit = 1 << meta.ch;
+          const resolvedGpio = boardPins?.find((p) => p.ch === meta.ch)?.gpio ?? meta.gpio;
           const cfg = channelConfigs[meta.ch] ?? { mode: 0, pull: 0, protect: true };
           const physHigh = (telemetry.physicalLevels & bit) !== 0;
           const forceActive = (telemetry.forceEnableMask & bit) !== 0;
@@ -124,8 +133,8 @@ export const ChannelStrip: React.FC<ChannelStripProps> = ({
                   )}
                   <span className="ch-gpio">
                     {channelLabels?.[meta.ch]?.trim()
-                      ? `${meta.label} · GPIO ${meta.gpio}`
-                      : `GPIO ${meta.gpio}`}
+                      ? `${meta.label} · GPIO ${resolvedGpio}`
+                      : `GPIO ${resolvedGpio}`}
                   </span>
                 </div>
               </div>

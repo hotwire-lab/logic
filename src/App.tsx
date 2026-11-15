@@ -462,6 +462,7 @@ export const App: React.FC = () => {
           telemetry={telemetry}
           channelConfigs={channelConfigs}
           channelLabels={channelLabels}
+          boardPins={boardCaps?.pins}
           onForceChannel={handleForceChannel}
           onRenameChannel={handleRenameChannel}
         />

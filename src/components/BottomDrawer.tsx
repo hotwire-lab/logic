@@ -12,6 +12,20 @@ import { WebSerialPort } from '../transport/web-apis';
 
 export type DrawerTab = 'terminal' | 'flasher';
 export type LineEnding = 'CRLF' | 'LF';
+export type FlashTargetBoard = 'auto' | 'esp32s3' | 'esp32c6';
+
+const BOARD_FLASH_PROFILES = {
+  esp32s3: {
+    label: 'XIAO-ESP32-S3',
+    prefix: 'HotWire_XIAO_ESP32S3.ino',
+    flashSize: '8MB' as const,
+  },
+  esp32c6: {
+    label: 'XIAO-ESP32-C6',
+    prefix: 'HotWire_XIAO_ESP32C6.ino',
+    flashSize: '4MB' as const,
+  },
+};
 
 interface BottomDrawerProps {
   connected: boolean;
@@ -38,12 +52,13 @@ export const BottomDrawer: React.FC<BottomDrawerProps> = ({
   const [lineEnding, setLineEnding] = useState<LineEnding>('CRLF');
 
   // Flasher state
+  const [targetBoard, setTargetBoard] = useState<FlashTargetBoard>('auto');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [flashOffset, setFlashOffset] = useState<'0x10000' | '0x0' | 'full'>('full');
   const [flashing, setFlashing] = useState(false);
   const [flashProgress, setFlashProgress] = useState(0);
   const [flashLogs, setFlashLogs] = useState<string[]>([
-    'Ready. Select a .bin image or use the bundled XIAO-ESP32-S3 firmware.',
+    'Ready. Select a .bin image or use the bundled XIAO-ESP32-S3 / XIAO-ESP32-C6 firmware.',
   ]);
 
   const termContainerRef = useRef<HTMLDivElement | null>(null);
@@ -163,13 +178,13 @@ export const BottomDrawer: React.FC<BottomDrawerProps> = ({
       return;
     }
     if (isDemo) {
-      appendFlashLog('Demo mode active — connect a physical XIAO-ESP32-S3 via USB to flash.');
+      appendFlashLog('Demo mode active — connect a physical XIAO-ESP32-S3 or XIAO-ESP32-C6 via USB to flash.');
       return;
     }
 
     setFlashing(true);
     setFlashProgress(0);
-    setFlashLogs(['[1/4] Selecting serial port & preparing firmware image...']);
+    setFlashLogs(['[1/4] Selecting serial port & connecting to ROM bootloader...']);
 
     const sleep = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
     let espTransport: EspTransport | null = null;
@@ -180,45 +195,8 @@ export const BottomDrawer: React.FC<BottomDrawerProps> = ({
       // Prompt / release active transport FIRST inside the user click gesture
       port = await onPrepareBootloaderPort(forcePromptPort);
       if (!port) {
-        appendFlashLog('Select the ESP32-S3 COM port in the browser prompt...');
+        appendFlashLog('Select the XIAO ESP32-S3 / ESP32-C6 COM port in the browser prompt...');
         port = await navigator.serial.requestPort();
-      }
-
-      // Load firmware binaries after acquiring the target serial port
-      const fileArray: Array<{ data: Uint8Array; address: number }> = [];
-
-      if (selectedFile) {
-        const buf = new Uint8Array(await selectedFile.arrayBuffer());
-        const addr = flashOffset === '0x0' ? 0x0 : 0x10000;
-        fileArray.push({ data: buf, address: addr });
-        appendFlashLog(`Loaded ${selectedFile.name} (${buf.byteLength} bytes) -> 0x${addr.toString(16)}`);
-      } else if (flashOffset === 'full') {
-        const [bootRes, partRes, bootApp0Res, appRes] = await Promise.all([
-          fetch('./firmware/HotWire_XIAO_ESP32S3.ino.bootloader.bin'),
-          fetch('./firmware/HotWire_XIAO_ESP32S3.ino.partitions.bin'),
-          fetch('./firmware/boot_app0.bin'),
-          fetch('./firmware/HotWire_XIAO_ESP32S3.ino.bin'),
-        ]);
-        if (!bootRes.ok || !partRes.ok || !bootApp0Res.ok || !appRes.ok) {
-          throw new Error('Failed to fetch bundled firmware binaries.');
-        }
-        fileArray.push(
-          { data: new Uint8Array(await bootRes.arrayBuffer()), address: 0x0 },
-          { data: new Uint8Array(await partRes.arrayBuffer()), address: 0x8000 },
-          { data: new Uint8Array(await bootApp0Res.arrayBuffer()), address: 0xe000 },
-          { data: new Uint8Array(await appRes.arrayBuffer()), address: 0x10000 }
-        );
-        appendFlashLog(
-          'Loaded bundled Bootloader (0x0), Partitions (0x8000), boot_app0 (0xe000), and App (0x10000).'
-        );
-      } else {
-        const appRes = await fetch('./firmware/HotWire_XIAO_ESP32S3.ino.bin');
-        if (!appRes.ok) {
-          throw new Error('Failed to fetch bundled HotWire_XIAO_ESP32S3.ino.bin.');
-        }
-        const appBuf = new Uint8Array(await appRes.arrayBuffer());
-        fileArray.push({ data: appBuf, address: 0x10000 });
-        appendFlashLog(`Loaded bundled HotWire_XIAO_ESP32S3.ino.bin (${appBuf.byteLength} bytes) -> 0x10000`);
       }
 
       const terminalAdapter: IEspLoaderTerminal = {
@@ -260,9 +238,10 @@ export const BottomDrawer: React.FC<BottomDrawerProps> = ({
         },
       });
 
-      appendFlashLog('[2/4] Entering & syncing with ESP32-S3 ROM bootloader...');
+      appendFlashLog('[2/4] Entering & syncing with ESP32 ROM bootloader...');
+      let chipName = '';
       try {
-        await loader.main('default_reset');
+        chipName = await loader.main('default_reset');
       } catch {
         appendFlashLog('Reset sync did not answer; retrying direct no_reset sync...');
         try {
@@ -271,7 +250,64 @@ export const BottomDrawer: React.FC<BottomDrawerProps> = ({
           // Ignore close cleanup before retry
         }
         await sleep(150);
-        await loader.main('no_reset');
+        chipName = await loader.main('no_reset');
+      }
+
+      const detectedUpper = (chipName || loader.chip?.CHIP_NAME || '').toUpperCase();
+      let resolvedKey: 'esp32s3' | 'esp32c6';
+      if (targetBoard === 'esp32c6' || targetBoard === 'esp32s3') {
+        resolvedKey = targetBoard;
+        if (detectedUpper && !detectedUpper.includes(resolvedKey === 'esp32c6' ? 'ESP32-C6' : 'ESP32-S3')) {
+          appendFlashLog(`WARNING: Detected "${chipName}" does not match manual target "${resolvedKey}".`);
+        }
+      } else if (detectedUpper.includes('ESP32-C6')) {
+        resolvedKey = 'esp32c6';
+      } else if (detectedUpper.includes('ESP32-S3')) {
+        resolvedKey = 'esp32s3';
+      } else {
+        throw new Error(
+          `Unsupported chip "${chipName || 'unknown'}". Expected ESP32-S3 or ESP32-C6 (or select board manually).`
+        );
+      }
+
+      const profile = BOARD_FLASH_PROFILES[resolvedKey];
+      appendFlashLog(`Target hardware: ${profile.label} (detected: ${chipName || 'unknown'})`);
+
+      // Load firmware binaries matching the detected/selected target chip
+      const fileArray: Array<{ data: Uint8Array; address: number }> = [];
+
+      if (selectedFile) {
+        const buf = new Uint8Array(await selectedFile.arrayBuffer());
+        const addr = flashOffset === '0x0' ? 0x0 : 0x10000;
+        fileArray.push({ data: buf, address: addr });
+        appendFlashLog(`Loaded ${selectedFile.name} (${buf.byteLength} bytes) -> 0x${addr.toString(16)}`);
+      } else if (flashOffset === 'full') {
+        const [bootRes, partRes, bootApp0Res, appRes] = await Promise.all([
+          fetch(`./firmware/${profile.prefix}.bootloader.bin`),
+          fetch(`./firmware/${profile.prefix}.partitions.bin`),
+          fetch('./firmware/boot_app0.bin'),
+          fetch(`./firmware/${profile.prefix}.bin`),
+        ]);
+        if (!bootRes.ok || !partRes.ok || !bootApp0Res.ok || !appRes.ok) {
+          throw new Error(`Failed to fetch bundled ${profile.label} firmware binaries.`);
+        }
+        fileArray.push(
+          { data: new Uint8Array(await bootRes.arrayBuffer()), address: 0x0 },
+          { data: new Uint8Array(await partRes.arrayBuffer()), address: 0x8000 },
+          { data: new Uint8Array(await bootApp0Res.arrayBuffer()), address: 0xe000 },
+          { data: new Uint8Array(await appRes.arrayBuffer()), address: 0x10000 }
+        );
+        appendFlashLog(
+          `Loaded ${profile.prefix}: Bootloader (0x0), Partitions (0x8000), boot_app0 (0xe000), and App (0x10000).`
+        );
+      } else {
+        const appRes = await fetch(`./firmware/${profile.prefix}.bin`);
+        if (!appRes.ok) {
+          throw new Error(`Failed to fetch bundled ${profile.prefix}.bin.`);
+        }
+        const appBuf = new Uint8Array(await appRes.arrayBuffer());
+        fileArray.push({ data: appBuf, address: 0x10000 });
+        appendFlashLog(`Loaded bundled ${profile.prefix}.bin (${appBuf.byteLength} bytes) -> 0x10000`);
       }
 
       appendFlashLog('[3/4] Writing flash...');
@@ -281,7 +317,7 @@ export const BottomDrawer: React.FC<BottomDrawerProps> = ({
 
       await loader.writeFlash({
         fileArray,
-        flashSize: isBundledFull ? '8MB' : 'keep',
+        flashSize: isBundledFull ? profile.flashSize : 'keep',
         flashMode: isBundledFull ? 'dio' : 'keep',
         flashFreq: isBundledFull ? '80m' : 'keep',
         eraseAll: false,
@@ -297,7 +333,7 @@ export const BottomDrawer: React.FC<BottomDrawerProps> = ({
         },
       });
 
-      appendFlashLog('[4/4] Hard resetting XIAO-ESP32-S3...');
+      appendFlashLog(`[4/4] Hard resetting ${profile.label}...`);
       await loader.after('hard_reset');
       await espTransport.setDTR(false);
       await espTransport.setRTS(true);
@@ -390,7 +426,9 @@ export const BottomDrawer: React.FC<BottomDrawerProps> = ({
             <input
               type="text"
               className="terminal-input"
-              placeholder={connected ? 'Send ASCII command to XIAO ESP32-S3...' : 'Connect device to send serial commands'}
+              placeholder={
+                connected ? 'Send ASCII command to XIAO ESP32-S3 / ESP32-C6...' : 'Connect device to send serial commands'
+              }
               value={inputText}
               disabled={!connected}
               onChange={(e) => setInputText(e.target.value)}
@@ -416,6 +454,21 @@ export const BottomDrawer: React.FC<BottomDrawerProps> = ({
         >
           <div className="flasher-controls">
             <label className="ctrl-field">
+              <span className="ctrl-label">Board</span>
+              <select
+                aria-label="Target board"
+                className="ctrl-select"
+                value={targetBoard}
+                disabled={flashing}
+                onChange={(e) => setTargetBoard(e.target.value as FlashTargetBoard)}
+              >
+                <option value="auto">Auto-Detect (ESP32-S3 / ESP32-C6)</option>
+                <option value="esp32s3">Seeed XIAO ESP32-S3 (8MB)</option>
+                <option value="esp32c6">Seeed XIAO ESP32-C6 (4MB)</option>
+              </select>
+            </label>
+
+            <label className="ctrl-field">
               <span className="ctrl-label">Target Image</span>
               <select
                 className="ctrl-select"
@@ -430,7 +483,13 @@ export const BottomDrawer: React.FC<BottomDrawerProps> = ({
             </label>
 
             <label className="file-picker-label">
-              <span>{selectedFile ? selectedFile.name : 'Using bundled HotWire_XIAO_ESP32S3.ino.bin'}</span>
+              <span>
+                {selectedFile
+                  ? selectedFile.name
+                  : targetBoard === 'auto'
+                    ? 'Using bundled firmware (S3 / C6 auto)'
+                    : `Using bundled ${BOARD_FLASH_PROFILES[targetBoard].prefix}.bin`}
+              </span>
               <input
                 type="file"
                 accept=".bin"

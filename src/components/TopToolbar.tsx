@@ -139,7 +139,7 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
                 type="button"
                 className="btn btn-secondary"
                 onClick={onStartDemo}
-                title="Launch offline XIAO ESP32-S3 hardware simulator"
+                title="Launch offline XIAO ESP32-S3 / ESP32-C6 hardware simulator"
               >
                 Demo
               </button>
