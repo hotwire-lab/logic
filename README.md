@@ -1,6 +1,6 @@
 # HotWire Pocket Lab — 8-Channel Logic Analyzer & Tri-State Force I/O
 
-A zero-install **Progressive Web App (PWA)** paired with **Seeed Studio XIAO ESP32-S3** firmware (`HotWire_XIAO_ESP32S3.ino`) providing an **8-channel digital logic analyzer (`D0`–`D7`, up to 20 MHz / 32,768 samples)**, **25 Hz live pin telemetry**, and **glitch-free tri-state forcing (`Z` / `0` / `1` + Pull-Up/Pull-Down + 20 ms short-circuit auto-cutoff)** over a single multiplexed USB CDC stream.
+A zero-install **Progressive Web App (PWA)** paired with **Seeed Studio XIAO ESP32-S3 / ESP32-C6** firmware (`HotWire_XIAO_ESP32.ino`) providing an **8-channel digital logic analyzer (`D0`–`D7`, up to 20 MHz / 32,768 samples)**, **25 Hz live pin telemetry**, and **glitch-free tri-state forcing (`Z` / `0` / `1` + Pull-Up/Pull-Down + 20 ms short-circuit auto-cutoff)** over a single multiplexed USB CDC stream.
 
 **Live Web App (GitHub Pages):** https://kavierim.github.io/HotWire-Logic-Analyzer/
 
@@ -24,11 +24,10 @@ A zero-install **Progressive Web App (PWA)** paired with **Seeed Studio XIAO ESP
 
 ## Arduino IDE Firmware Build Settings
 
-Open [HotWire_XIAO_ESP32S3.ino](./firmware/HotWire_XIAO_ESP32S3/HotWire_XIAO_ESP32S3.ino) in Arduino IDE (or `arduino-cli`) with Espressif ESP32 Core (`v2.0.14+` or `v3.x`):
+Open [HotWire_XIAO_ESP32.ino](./firmware/HotWire_XIAO_ESP32/HotWire_XIAO_ESP32.ino) in Arduino IDE (or `arduino-cli`) with Espressif ESP32 Core (`v2.0.14+` or `v3.x`):
 
-* **Board:** `XIAO_ESP32S3` (`esp32:esp32:XIAO_ESP32S3`)
-* **USB CDC On Boot:** `Enabled`
-* **CPU Frequency:** `240MHz (WiFi)`
+* **XIAO ESP32-S3:** Board `XIAO_ESP32S3` (`esp32:esp32:XIAO_ESP32S3`), `USB CDC On Boot: Enabled`, `CPU Frequency: 240MHz (WiFi)`
+* **XIAO ESP32-C6:** Board `XIAO_ESP32C6` (`esp32:esp32:XIAO_ESP32C6`), `USB CDC On Boot: Enabled`, `CPU Frequency: 160MHz (WiFi)`
 
 ## Development
 
