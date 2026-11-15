@@ -233,6 +233,11 @@ body,
   background: #da3633;
 }
 
+.capture-primary-btn {
+  min-width: 74px;
+  text-align: center;
+}
+
 .btn-toggle.active,
 .btn-secondary.active {
   background: rgba(88, 166, 255, 0.22);

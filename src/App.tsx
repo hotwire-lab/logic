@@ -282,15 +282,22 @@ export const App: React.FC = () => {
   };
 
   const handleAbortCapture = useCallback(() => {
+    continuousRef.current = false;
     setContinuous(false);
-    void transportRef.current?.writeBytes(buildLaAbortCmd());
-    if (abortWatchdogRef.current !== null) {
-      window.clearTimeout(abortWatchdogRef.current);
+    if (continuousTimerRef.current !== null) {
+      window.clearTimeout(continuousTimerRef.current);
+      continuousTimerRef.current = null;
     }
-    abortWatchdogRef.current = window.setTimeout(() => {
-      abortWatchdogRef.current = null;
-      setCapturing(false);
-    }, 350);
+    if (capturingRef.current) {
+      void transportRef.current?.writeBytes(buildLaAbortCmd());
+      if (abortWatchdogRef.current !== null) {
+        window.clearTimeout(abortWatchdogRef.current);
+      }
+      abortWatchdogRef.current = window.setTimeout(() => {
+        abortWatchdogRef.current = null;
+        setCapturing(false);
+      }, 350);
+    }
   }, []);
 
   const decodedFrames = useMemo<DecodedFrameAnnotation[]>(() => {
@@ -341,7 +348,7 @@ export const App: React.FC = () => {
       if (e.code === 'Space') {
         if (statusRef.current !== 'connected') return;
         e.preventDefault();
-        if (capturingRef.current) handleAbortCapture();
+        if (capturingRef.current || continuousRef.current) handleAbortCapture();
         else triggerCapture();
       } else if (e.key === '+' || e.key === '=') {
         e.preventDefault();
@@ -370,9 +377,13 @@ export const App: React.FC = () => {
 
   const handleToggleContinuous = () => {
     const next = !continuous;
+    continuousRef.current = next;
     setContinuous(next);
+    if (!next && continuousTimerRef.current !== null) {
+      window.clearTimeout(continuousTimerRef.current);
+      continuousTimerRef.current = null;
+    }
     if (next && !capturing) {
-      continuousRef.current = true;
       triggerCapture();
     }
   };

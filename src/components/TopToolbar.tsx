@@ -70,6 +70,8 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
   onExportVcd,
 }) => {
   const isConnected = connectionStatus === 'connected';
+  const isCaptureRunning = capturing || continuous;
+  const controlsLocked = capturing && !continuous;
   const rate = RATE_PRESETS[captureConfig.rateId] ?? RATE_PRESETS[6];
   const samples = captureConfig.blocksKb * 1024;
   const windowDurationSec = samples / rate.hz;
@@ -159,7 +161,7 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
               aria-label="Sample rate"
               className="ctrl-select"
               value={captureConfig.rateId}
-              disabled={capturing}
+              disabled={controlsLocked}
               onChange={(e) => onUpdateCaptureConfig({ rateId: Number(e.target.value) })}
             >
               {RATE_PRESETS.map((preset) => (
@@ -176,7 +178,7 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
               aria-label="Sample depth"
               className="ctrl-select"
               value={captureConfig.blocksKb}
-              disabled={capturing}
+              disabled={controlsLocked}
               onChange={(e) => onUpdateCaptureConfig({ blocksKb: Number(e.target.value) })}
             >
               {DEPTH_PRESETS.map((d) => (
@@ -199,7 +201,7 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
               aria-label="Trigger channel"
               className="ctrl-select"
               value={captureConfig.triggerChannel === null ? 'free' : String(captureConfig.triggerChannel)}
-              disabled={capturing}
+              disabled={controlsLocked}
               onChange={(e) => {
                 const v = e.target.value;
                 onUpdateCaptureConfig({
@@ -230,7 +232,7 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
                     key={opt.val}
                     type="button"
                     title={opt.title}
-                    disabled={capturing}
+                    disabled={controlsLocked}
                     className={`seg-btn ${captureConfig.edge === opt.val ? 'active' : ''}`}
                     onClick={() => onUpdateCaptureConfig({ edge: opt.val })}
                   >
@@ -252,7 +254,7 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
                     key={opt.val}
                     type="button"
                     title={`Pre-trigger buffer ${opt.label}`}
-                    disabled={capturing}
+                    disabled={controlsLocked}
                     className={`seg-btn ${captureConfig.preTrigger === opt.val ? 'active' : ''}`}
                     onClick={() => onUpdateCaptureConfig({ preTrigger: opt.val })}
                   >
@@ -477,10 +479,10 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
         </div>
 
         <div className="capture-action-group">
-          {!capturing ? (
+          {!isCaptureRunning ? (
             <button
               type="button"
-              className="btn btn-accent"
+              className="btn btn-accent capture-primary-btn"
               disabled={!isConnected}
               onClick={onCapture}
               title="Start single capture (Space)"
@@ -490,7 +492,7 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
           ) : (
             <button
               type="button"
-              className="btn btn-danger"
+              className="btn btn-danger capture-primary-btn"
               onClick={onAbort}
               title="Abort ongoing capture and retrieve partial buffer (Space)"
             >
@@ -503,9 +505,9 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
             className={`btn btn-toggle ${continuous ? 'active' : ''}`}
             disabled={!isConnected}
             onClick={onToggleContinuous}
-            title="Auto / Continuous capture loop"
+            title="Continuous capture loop"
           >
-            Auto
+            Continuous
           </button>
 
           {hasCapture && (
