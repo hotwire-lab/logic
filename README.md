@@ -4,6 +4,8 @@ A zero-install **Progressive Web App (PWA)** paired with **Seeed Studio XIAO ESP
 
 **Live Web App (GitHub Pages):** https://kavierim.github.io/HotWire-Logic-Analyzer/
 
+![HotWire Logic Analyzer UI](./docs/screenshot.png)
+
 ## Features
 
 * **Dual-Platform USB Connectivity (`SerialTransport`):**
