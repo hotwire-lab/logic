@@ -30,7 +30,13 @@ import {
   TYPE_LA_CAPTURE_DATA,
   TYPE_STATUS_TELEMETRY,
 } from './protocol/types';
-import { SerialTransport, TransportSnapshot } from './transport/SerialTransport';
+import {
+  detectPreferredBackend,
+  SerialTransport,
+  TransportSnapshot,
+  WEBUSB_FILTERS,
+} from './transport/SerialTransport';
+import { WebUsbCdcSerialPort } from './transport/WebUsbSerialPort';
 import { WebSerialPort } from './transport/web-apis';
 
 const CHANNEL_LABELS_STORAGE_KEY = 'hotwire.channelLabels.v1';
@@ -406,8 +412,28 @@ export const App: React.FC = () => {
       const transport = transportRef.current!;
       transport.setAutoReconnectPaused(true);
 
-      let chosenPort: WebSerialPort | null = null;
       const snap = transport.getSnapshot();
+      const preferred = detectPreferredBackend();
+      const useWebUsb =
+        snap.transport === 'webusb' ||
+        (snap.transport !== 'webserial' && preferred === 'webusb');
+
+      if (useWebUsb && navigator.usb) {
+        let usbDevice = forcePromptPort ? null : transport.getActiveWebUsbDevice();
+        if (forcePromptPort || snap.transport !== 'webusb' || !usbDevice) {
+          try {
+            usbDevice = await navigator.usb.requestDevice({ filters: WEBUSB_FILTERS });
+          } catch (err) {
+            transport.setAutoReconnectPaused(false);
+            throw err;
+          }
+        }
+        await transport.disconnect(true);
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 150));
+        return new WebUsbCdcSerialPort(usbDevice);
+      }
+
+      let chosenPort: WebSerialPort | null = null;
       const hadWebSerial = snap.status === 'connected' && snap.transport === 'webserial';
 
       if ((forcePromptPort || !hadWebSerial) && navigator.serial) {
@@ -432,7 +458,14 @@ export const App: React.FC = () => {
     if (!transport) return;
     await new Promise<void>((resolve) => window.setTimeout(resolve, 600));
     transport.setAutoReconnectPaused(false);
-    if (flashedPort) {
+    if (flashedPort instanceof WebUsbCdcSerialPort) {
+      try {
+        await transport.connectWebUsbDevice(flashedPort.getUsbDevice());
+      } catch {
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 900));
+        await transport.probeAuthorizedDevices();
+      }
+    } else if (flashedPort) {
       await transport.connectWebSerialPort(flashedPort);
     } else {
       await transport.probeAuthorizedDevices();

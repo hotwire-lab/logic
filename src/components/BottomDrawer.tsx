@@ -174,8 +174,8 @@ export const BottomDrawer: React.FC<BottomDrawerProps> = ({
 
   const handleFlash = async (forcePromptPort = false) => {
     if (flashing) return;
-    if (typeof navigator === 'undefined' || !navigator.serial) {
-      appendFlashLog('ERROR: Web Serial API (navigator.serial) is required for esptool-js flashing.');
+    if (typeof navigator === 'undefined' || (!navigator.serial && !navigator.usb)) {
+      appendFlashLog('ERROR: Web Serial or WebUSB API is required for esptool-js flashing.');
       return;
     }
     if (isDemo) {
@@ -196,6 +196,9 @@ export const BottomDrawer: React.FC<BottomDrawerProps> = ({
       // Prompt / release active transport FIRST inside the user click gesture
       port = await onPrepareBootloaderPort(forcePromptPort);
       if (!port) {
+        if (!navigator.serial) {
+          throw new Error('No USB device selected.');
+        }
         appendFlashLog('Select the XIAO ESP32-S3 / ESP32-C6 COM port in the browser prompt...');
         port = await navigator.serial.requestPort();
       }

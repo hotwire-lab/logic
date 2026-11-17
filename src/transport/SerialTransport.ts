@@ -42,14 +42,14 @@ export interface TransportSnapshot {
 export type TransportStateListener = (snapshot: TransportSnapshot) => void;
 export type TransportBytesListener = (bytes: Uint8Array) => void;
 
-const WEBUSB_FILTERS: WebUSBDeviceFilter[] = [
+export const WEBUSB_FILTERS: WebUSBDeviceFilter[] = [
   { vendorId: 0x303a }, // Espressif native USB CDC / JTAG
   { vendorId: 0x2886 }, // Seeed Studio
   { classCode: 2, subclassCode: 2 }, // USB CDC-ACM
   { classCode: 239, subclassCode: 2, protocolCode: 1 }, // Composite IAD CDC
 ];
 
-interface CdcEndpointDescriptor {
+export interface CdcEndpointDescriptor {
   controlInterfaceNumber: number;
   dataInterfaceNumber: number;
   inEndpointNumber: number;
@@ -64,7 +64,7 @@ function formatVidPid(vid?: number, pid?: number): string {
   return `${v}:${p}`;
 }
 
-function encodeCdcLineCoding(baudRate = 115200): Uint8Array {
+export function encodeCdcLineCoding(baudRate = 115200): Uint8Array {
   const buf = new ArrayBuffer(7);
   const view = new DataView(buf);
   view.setUint32(0, baudRate, true);
@@ -74,7 +74,7 @@ function encodeCdcLineCoding(baudRate = 115200): Uint8Array {
   return new Uint8Array(buf);
 }
 
-function findCdcEndpoints(device: WebUSBDevice): CdcEndpointDescriptor | null {
+export function findCdcEndpoints(device: WebUSBDevice): CdcEndpointDescriptor | null {
   const config = device.configuration ?? device.configurations[0];
   if (!config) return null;
 
@@ -254,12 +254,20 @@ export class SerialTransport {
     return this.webSerialPort;
   }
 
+  getActiveWebUsbDevice(): WebUSBDevice | null {
+    return this.webUsbDevice;
+  }
+
   setAutoReconnectPaused(paused: boolean): void {
     this.autoReconnectPaused = paused;
   }
 
   async connectWebSerialPort(port: WebSerialPort): Promise<void> {
     await this.openWebSerialPort(port);
+  }
+
+  async connectWebUsbDevice(device: WebUSBDevice): Promise<void> {
+    await this.openWebUsbDevice(device);
   }
 
   async probeAuthorizedDevices(): Promise<void> {
