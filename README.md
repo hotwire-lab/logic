@@ -33,16 +33,12 @@ Open [HotWire_XIAO_ESP32.ino](./firmware/HotWire_XIAO_ESP32/HotWire_XIAO_ESP32.i
 
 ## Development
 
-```bash
-npm install
-npm run dev
-```
-
-Verify lint, typecheck, unit tests, and production bundle:
+Built with **Rust + WebAssembly** ([Leptos](https://leptos.dev/) CSR + [Trunk](https://trunkrs.dev/)).
 
 ```bash
-npm run lint
-npm run typecheck
-npm test
-npm run build
+rustup target add wasm32-unknown-unknown
+cargo clippy --all-targets -- -D warnings
+cargo test
+trunk serve          # local dev server (http://127.0.0.1:8081)
+trunk build --release
 ```
