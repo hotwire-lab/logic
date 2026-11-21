@@ -1,8 +1,14 @@
-# HotWire Pocket Lab — 8-Channel Logic Analyzer & Tri-State Force I/O
+# HotWire Logic Analyzer — 8-Channel Pocket Lab & Tri-State Force I/O
+
+[![Deploy to GitHub Pages](https://github.com/kavierim/HotWire-Logic-Analyzer/actions/workflows/deploy.yml/badge.svg)](https://github.com/kavierim/HotWire-Logic-Analyzer/actions/workflows/deploy.yml)
+[![Live Web App](https://img.shields.io/badge/Live_Web_App-GitHub_Pages-0ea5e9?logo=googlechrome&logoColor=white)](https://kavierim.github.io/HotWire-Logic-Analyzer/)
+[![Hardware](https://img.shields.io/badge/Hardware-XIAO_ESP32--S3_%2F_C6-10b981)](https://www.seeedstudio.com/XIAO-ESP32S3-p-5627.html)
+[![Web Serial & WebUSB](https://img.shields.io/badge/USB-Web_Serial_%2F_WebUSB-8b5cf6)](https://developer.mozilla.org/en-US/docs/Web/API/Web_Serial_API)
+[![Rust + WASM](https://img.shields.io/badge/Stack-Rust_%2B_Leptos_WASM-f97316?logo=rust&logoColor=white)](https://leptos.dev/)
 
 A zero-install **Progressive Web App (PWA)** paired with **Seeed Studio XIAO ESP32-S3 / ESP32-C6** firmware (`HotWire_XIAO_ESP32.ino`) providing an **8-channel digital logic analyzer (`D0`–`D7`, up to 20 MHz / 32,768 samples)**, **25 Hz live pin telemetry**, and **glitch-free tri-state forcing (`Z` / `0` / `1` + Pull-Up/Pull-Down + 20 ms short-circuit auto-cutoff)** over a single multiplexed USB CDC stream.
 
-**Live Web App (GitHub Pages):** https://kavierim.github.io/HotWire-Logic-Analyzer/
+> **Try it in 1 click (no hardware required):** Open **[https://kavierim.github.io/HotWire-Logic-Analyzer/](https://kavierim.github.io/HotWire-Logic-Analyzer/)** and click **Demo** to explore live captures, pin forcing, and UART/SPI/I²C protocol decoding.
 
 ![HotWire Logic Analyzer UI](./docs/screenshot.png)
 
@@ -22,7 +28,7 @@ A zero-install **Progressive Web App (PWA)** paired with **Seeed Studio XIAO ESP
 * **Single-Screen Dark UI & Tools:**
   * Sticky 8-row Tri-State Force strip (`[ Z ] [ 0 ] [ 1 ]`, momentary `[ ⚡ ]` pulse, `[ - | PU | PD ]` pull control, flashing `SHORT!` fault indicator, and red `[ Release All (Z) ]` button).
   * High-DPI interactive `<canvas>` waveform viewer aligned 1:1 with the 8 channel rows, featuring dynamic time ruler, trigger marker, zoom/pan/touch-pinch, and draggable `A`/`B` measurement cursors ($\Delta t$ and $1/\Delta t$).
-  * Collapsible bottom drawer with **`xterm.js` Serial Terminal** and **`esptool-js` Web Flasher** (`0xF0` auto-reboot to ROM bootloader + `.bin` flashing).
+  * Collapsible bottom **Web Flasher** drawer (`0xF0` auto-reboot to ROM bootloader + bundled `.bin` flashing for XIAO ESP32-S3 & ESP32-C6).
 
 ## Arduino IDE Firmware Build Settings
 
