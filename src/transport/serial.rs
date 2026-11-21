@@ -4,7 +4,9 @@ pub use hotwire_core::transport::{
 
 use hotwire_core::transport::DemoBackend;
 
-use crate::protocol::codec::{build_bootloader_cmd, build_get_caps_cmd, build_ping_status_cmd};
+use crate::protocol::codec::{
+    build_bootloader_cmd, build_get_caps_cmd, build_la_abort_cmd, build_ping_status_cmd,
+};
 use crate::transport::demo::{DemoAction, DemoSimulator};
 
 struct LaDemoAdapter {
@@ -116,11 +118,13 @@ impl LaDemoAdapter {
 }
 
 pub fn create_logic_transport() -> SerialTransport {
-    let mut cfg = SerialConfig::hotwire_cdc("hotwire_la_last_device");
-    cfg.baud_rate = 115_200;
+    let cfg = SerialConfig::hotwire_cdc("hotwire_la_last_device");
     let transport = SerialTransport::with_demo(cfg, LaDemoAdapter::new());
 
-    let mut init_cmds = Vec::with_capacity(16);
+    // Abort any previously armed capture before requesting 0x83 capabilities + telemetry,
+    // matching Oscilloscope and SDR reconnect behavior.
+    let mut init_cmds = Vec::with_capacity(24);
+    init_cmds.extend_from_slice(&build_la_abort_cmd());
     init_cmds.extend_from_slice(&build_get_caps_cmd());
     init_cmds.extend_from_slice(&build_ping_status_cmd());
     transport.set_init_commands(init_cmds);

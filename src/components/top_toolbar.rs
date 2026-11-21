@@ -101,13 +101,6 @@ pub fn TopToolbar(
         </HotWireToolbar>
 
         <header class="top-toolbar">
-            {move || {
-                transport
-                    .get()
-                    .error_message
-                    .map(|err| view! { <div class="toolbar-error-banner">{err}</div> })
-            }}
-
             <div class="toolbar-row toolbar-capture">
                 <div class="capture-control-group">
                     <label class="ctrl-field">

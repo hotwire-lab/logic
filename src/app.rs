@@ -282,6 +282,7 @@ pub fn App() -> impl IntoView {
                                 }
                                 mismatch.set(None);
                                 flasher_mismatch.set(None);
+                                drawer_open.set(false);
                                 identity.set(Some(id));
                                 board_caps.set(Some(caps));
                             }
