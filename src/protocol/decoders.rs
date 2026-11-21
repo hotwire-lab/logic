@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use crate::protocol::types::{CaptureDataFrame, CHANNELS};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -705,13 +707,14 @@ pub fn export_capture_to_csv(capture: &CaptureDataFrame, channel_names: &[String
         .collect();
 
     let mut out = String::with_capacity(capture.samples.len() * 32 + 128);
-    out.push_str(&format!("sample_index,time_s,{}\n", headers.join(",")));
+    let _ = writeln!(out, "sample_index,time_s,{}", headers.join(","));
 
     let rate = capture.sample_rate_hz.max(1) as f64;
     for (i, &s) in capture.samples.iter().enumerate() {
         let t = (i as f64) / rate;
-        out.push_str(&format!(
-            "{i},{t:.9},{},{},{},{},{},{},{},{}\n",
+        let _ = writeln!(
+            out,
+            "{i},{t:.9},{},{},{},{},{},{},{},{}",
             s & 1,
             (s >> 1) & 1,
             (s >> 2) & 1,
@@ -720,7 +723,7 @@ pub fn export_capture_to_csv(capture: &CaptureDataFrame, channel_names: &[String
             (s >> 5) & 1,
             (s >> 6) & 1,
             (s >> 7) & 1
-        ));
+        );
     }
     out
 }
@@ -762,14 +765,14 @@ pub fn export_capture_to_vcd(capture: &CaptureDataFrame, channel_names: &[String
         } else {
             safe_name
         };
-        out.push_str(&format!("$var wire 1 {} {} $end\n", VCD_SYMBOLS[ch], name));
+        let _ = writeln!(out, "$var wire 1 {} {} $end", VCD_SYMBOLS[ch], name);
     }
 
     out.push_str("$upscope $end\n$enddefinitions $end\n$dumpvars\n");
 
     if let Some(&first) = capture.samples.first() {
         for (ch, &sym) in VCD_SYMBOLS.iter().enumerate() {
-            out.push_str(&format!("{}{}\n", (first >> ch) & 1, sym));
+            let _ = writeln!(out, "{}{}", (first >> ch) & 1, sym);
         }
         out.push_str("$end\n");
 
@@ -779,17 +782,17 @@ pub fn export_capture_to_vcd(capture: &CaptureDataFrame, channel_names: &[String
             if diff == 0 {
                 continue;
             }
-            out.push_str(&format!("#{}\n", (i as u64) * ps_per_sample));
+            let _ = writeln!(out, "#{}", (i as u64) * ps_per_sample);
             for (ch, &sym) in VCD_SYMBOLS.iter().enumerate() {
                 if ((diff >> ch) & 1) != 0 {
-                    out.push_str(&format!("{}{}\n", (cur >> ch) & 1, sym));
+                    let _ = writeln!(out, "{}{}", (cur >> ch) & 1, sym);
                 }
             }
             prev = cur;
         }
     } else {
         for &sym in &VCD_SYMBOLS {
-            out.push_str(&format!("0{sym}\n"));
+            let _ = writeln!(out, "0{sym}");
         }
         out.push_str("$end\n");
     }

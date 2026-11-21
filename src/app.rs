@@ -397,8 +397,14 @@ pub fn App() -> impl IntoView {
         drawer_open.set(true);
     });
     let on_disconnect = Callback::new(move |_| {
+        if capturing.get_untracked() {
+            let cmd = build_la_abort_cmd();
+            serial_transport.with_value(|t| t.send_bytes(&cmd));
+        }
         continuous.set(false);
         capturing.set(false);
+        clear_watchdogs();
+        clear_continuous_timer();
         channel_configs.set([ChannelUiState::default(); 8]);
         telemetry.set(StatusTelemetry::default());
         serial_transport.with_value(|t| t.disconnect());

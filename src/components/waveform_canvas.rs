@@ -172,6 +172,7 @@ pub fn WaveformCanvas(
     let gesture_tracker = StoredValue::new(PinchPanTracker::new());
     let drag_mode = StoredValue::new(DragMode::None);
     let down_pos = StoredValue::new((0.0f64, 0.0f64, false));
+    let raf_pending = StoredValue::new(false);
 
     let get_canvas_dims = move || -> (f64, f64) {
         if let Some(c) = canvas_ref.get_untracked() {
@@ -327,21 +328,20 @@ pub fn WaveformCanvas(
         cb.forget();
     });
 
-    // Main Canvas 2D renderer
-    Effect::new(move |_| {
-        let _r = resize_rev.get();
-        let cur_cap = capture.get();
-        let is_capturing = capturing.get();
-        let cur_view = view.get();
-        let cur_show_cursors = show_cursors.get();
-        let cur_a = cursor_a.get();
-        let cur_b = cursor_b.get();
-        let cur_active_ch = active_channel.get();
-        let cur_hover = hover_state.get();
-        let cur_snap = snap_marker.get();
-        let cur_box = box_zoom_range.get();
-        let frames = decoded_frames.get();
-        let sel_id = selected_frame_id.get();
+    // Main Canvas 2D renderer (coalesced onto requestAnimationFrame)
+    let render_waveform = move || {
+        let cur_cap = capture.get_untracked();
+        let is_capturing = capturing.get_untracked();
+        let cur_view = view.get_untracked();
+        let cur_show_cursors = show_cursors.get_untracked();
+        let cur_a = cursor_a.get_untracked();
+        let cur_b = cursor_b.get_untracked();
+        let cur_active_ch = active_channel.get_untracked();
+        let cur_hover = hover_state.get_untracked();
+        let cur_snap = snap_marker.get_untracked();
+        let cur_box = box_zoom_range.get_untracked();
+        let frames = decoded_frames.get_untracked();
+        let sel_id = selected_frame_id.get_untracked();
 
         let Some(canvas) = canvas_ref.get() else {
             return;
@@ -553,12 +553,23 @@ pub fn WaveformCanvas(
                 ctx.stroke();
 
                 ctx.set_fill_style_str(&format!("{}1C", meta.color));
+                let fill_h = y_low - y_high;
+                let mut run_start: Option<usize> = None;
                 for (idx, &sample) in samples.iter().enumerate().take(i_to + 1).skip(i_from) {
                     if (sample & bit_mask) != 0 {
-                        let sx = sample_to_x(idx as f64);
-                        let sw = (sample_to_x((idx + 1) as f64) - sx).max(1.0);
-                        ctx.fill_rect(sx, y_high, sw, y_low - y_high);
+                        if run_start.is_none() {
+                            run_start = Some(idx);
+                        }
+                    } else if let Some(rs) = run_start.take() {
+                        let sx = sample_to_x(rs as f64);
+                        let sw = (sample_to_x(idx as f64) - sx).max(1.0);
+                        ctx.fill_rect(sx, y_high, sw, fill_h);
                     }
+                }
+                if let Some(rs) = run_start {
+                    let sx = sample_to_x(rs as f64);
+                    let sw = (sample_to_x((i_to + 1) as f64) - sx).max(1.0);
+                    ctx.fill_rect(sx, y_high, sw, fill_h);
                 }
 
                 if px_per_sample >= 10.0 {
@@ -818,6 +829,37 @@ pub fn WaveformCanvas(
                 ctx.stroke();
                 ctx.restore();
             }
+        }
+    };
+
+    Effect::new(move |_| {
+        let _r = resize_rev.get();
+        let _c = capture.with(|c| c.is_some());
+        let _cap = capturing.get();
+        let _v = view.get();
+        let _sc = show_cursors.get();
+        let _a = cursor_a.get();
+        let _b = cursor_b.get();
+        let _ch = active_channel.get();
+        let _h = hover_state.get();
+        let _sn = snap_marker.get();
+        let _bx = box_zoom_range.get();
+        let _f = decoded_frames.with(|f| f.len());
+        let _s = selected_frame_id.get();
+
+        if raf_pending.get_value() {
+            return;
+        }
+        raf_pending.set_value(true);
+        if let Some(win) = web_sys::window() {
+            let cb = wasm_bindgen::closure::Closure::once_into_js(move || {
+                raf_pending.set_value(false);
+                render_waveform();
+            });
+            let _ = win.request_animation_frame(cb.unchecked_ref());
+        } else {
+            raf_pending.set_value(false);
+            render_waveform();
         }
     });
 
