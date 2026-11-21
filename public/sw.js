@@ -1,4 +1,4 @@
-const CACHE_NAME = 'hotwire-pocket-lab-v4';
+const CACHE_NAME = 'hotwire-pocket-lab-v5';
 const APP_SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg'];
 
 self.addEventListener('install', (event) => {

@@ -229,7 +229,7 @@ pub fn App() -> impl IntoView {
                     mismatch.set(None);
                     flasher_mismatch.set(None);
                     handshake_guard.update_value(|g| {
-                        g.arm_timeout(dev_name, 3500, move |mm| {
+                        g.arm_timeout(dev_name, 5000, move |mm| {
                             mismatch.set(Some(mm.clone()));
                             flasher_mismatch.set(Some(mm));
                             serial_transport.with_value(|t| t.disconnect());
@@ -265,6 +265,7 @@ pub fn App() -> impl IntoView {
                                 });
                             }
                             DecodedPacket::BoardCapabilities(id, caps) => {
+                                serial_transport.with_value(|t| t.notify_handshake_ok());
                                 if transport.get_untracked().status.is_usb_connected() {
                                     let mut verdict = Ok(());
                                     handshake_guard.update_value(|g| {
