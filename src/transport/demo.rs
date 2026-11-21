@@ -82,7 +82,7 @@ impl DemoSimulator {
             .map(|c| format!(r#"{{"ch":{},"label":"{}","gpio":{}}}"#, c.ch, c.label, c.gpio))
             .collect();
         let json = format!(
-            r#"{{"board":"XIAO-ESP32-S3","firmware":"1.0.0-demo","channels":8,"maxRateHz":20000000,"maxDepth":32768,"pins":[{}]}}"#,
+            r#"{{"board":"XIAO-ESP32-S3","firmware":"1.2.0-demo","channels":8,"maxRateHz":20000000,"maxDepth":32768,"pins":[{}]}}"#,
             pins.join(",")
         );
         encode_response_frame(TYPE_BOARD_CAPABILITIES, json.as_bytes())
