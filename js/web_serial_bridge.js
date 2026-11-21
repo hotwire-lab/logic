@@ -589,7 +589,7 @@ export async function js_flash_firmware(
   onProgress,
 ) {
   if (typeof navigator === 'undefined' || (!navigator.serial && !navigator.usb)) {
-    throw new Error('Web Serial or WebUSB API is required for esptool-js flashing.');
+    throw new Error('Web Serial or WebUSB API is required for browser firmware flashing.');
   }
 
   const profiles = {

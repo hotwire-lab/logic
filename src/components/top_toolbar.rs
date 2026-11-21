@@ -89,8 +89,20 @@ pub fn TopToolbar(
         <header class="top-toolbar">
             <div class="toolbar-row toolbar-primary">
                 <div class="brand-group">
-                    <span class="brand-title">"HotWire"</span>
-                    <span class="brand-sub">"8-Ch Pocket Lab · Rust"</span>
+                    <div class="brand-logo" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" width="18" height="18">
+                            <path
+                                d="M2 16h4V8h5v8h4V8h5v8h2"
+                                fill="none"
+                                stroke="#4ade80"
+                                stroke-width="2.2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            />
+                        </svg>
+                    </div>
+                    <span class="brand-title">"HotWire Logic Analyzer"</span>
+                    <span class="brand-sub">"8-Ch · Rust/WASM"</span>
                     <span
                         class=pill_class
                         title=move || transport.get().error_message.unwrap_or_default()

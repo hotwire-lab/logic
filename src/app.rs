@@ -87,25 +87,6 @@ fn download_text_file(filename: &str, content: &str, mime_type: &str) {
     cb.forget();
 }
 
-/// Strip basic ANSI escape codes (`\x1b[...m`) for clean `<pre>` terminal output.
-fn strip_ansi(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '\x1b' && chars.peek() == Some(&'[') {
-            chars.next();
-            for c in chars.by_ref() {
-                if c.is_ascii_alphabetic() {
-                    break;
-                }
-            }
-        } else if ch != '\r' {
-            out.push(ch);
-        }
-    }
-    out
-}
-
 #[component]
 pub fn App() -> impl IntoView {
     let serial_transport = StoredValue::new_local(SerialTransport::new());
@@ -121,7 +102,6 @@ pub fn App() -> impl IntoView {
     let capture = RwSignal::new(None::<CaptureDataFrame>);
     let capturing = RwSignal::new(false);
     let continuous = RwSignal::new(false);
-    let terminal_text = RwSignal::new(String::new());
 
     let waveform_cmd = RwSignal::new(None::<(u64, WaveformCommand)>);
     let cmd_seq = StoredValue::new(0u64);
@@ -288,21 +268,7 @@ pub fn App() -> impl IntoView {
                                 }
                             }
                         },
-                        |text_bytes| {
-                            let s = String::from_utf8_lossy(text_bytes);
-                            let cleaned = strip_ansi(&s);
-                            if !cleaned.is_empty() {
-                                terminal_text.update(|buf| {
-                                    buf.push_str(&cleaned);
-                                    if buf.len() > 64_000 {
-                                        let cut = buf.len() - 48_000;
-                                        if let Some(nl) = buf[cut..].find('\n') {
-                                            buf.drain(0..(cut + nl + 1));
-                                        }
-                                    }
-                                });
-                            }
-                        },
+                        |_| {},
                     );
                 });
             },
@@ -455,10 +421,6 @@ pub fn App() -> impl IntoView {
             end: frame.end_sample,
         });
     });
-    let on_send_text = Callback::new(move |text: String| {
-        serial_transport.with_value(|t| t.write_bytes(text.as_bytes()));
-    });
-    let on_clear_terminal = Callback::new(move |_| terminal_text.set(String::new()));
 
     view! {
         <div class="app-shell">
@@ -578,9 +540,6 @@ pub fn App() -> impl IntoView {
             <BottomDrawer
                 connected=connected
                 is_demo=is_demo
-                terminal_text=terminal_text
-                on_clear_terminal=on_clear_terminal
-                on_send_text=on_send_text
                 serial_transport=serial_transport
             />
         </div>
