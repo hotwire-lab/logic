@@ -31,6 +31,13 @@ Open [HotWire_XIAO_ESP32.ino](./firmware/HotWire_XIAO_ESP32/HotWire_XIAO_ESP32.i
 * **XIAO ESP32-S3:** Board `XIAO_ESP32S3` (`esp32:esp32:XIAO_ESP32S3`), `USB CDC On Boot: Enabled`, `CPU Frequency: 240MHz (WiFi)`
 * **XIAO ESP32-C6:** Board `XIAO_ESP32C6` (`esp32:esp32:XIAO_ESP32C6`), `USB CDC On Boot: Enabled`, `CPU Frequency: 160MHz (WiFi)`
 
+## HotWire Ecosystem
+
+* **[HotWire Logic Analyzer](https://github.com/kavierim/HotWire-Logic-Analyzer)** ([Live App](https://kavierim.github.io/HotWire-Logic-Analyzer/)) — 8-Channel Logic Analyzer & Tri-State Force I/O with UART/SPI/I²C decoders
+* **[HotWire Oscilloscope](https://github.com/kavierim/HotWire-Oscilloscope)** ([Live App](https://kavierim.github.io/HotWire-Oscilloscope/)) — 4-Channel 12-bit GDMA ADC Oscilloscope & FFT Spectrum Analyzer
+* **[HotWire SDR](https://github.com/kavierim/HotWire-SDR)** ([Live App](https://kavierim.github.io/HotWire-SDR/)) — 1.84–2.79 GHz RF Spectrum Analyzer, Wideband Scanner & Waterfall for XIAO ESP32-S3 & XIAO ESP32-C6
+* **[HotWire Serial Terminal](https://github.com/kavierim/HotWire-Serial-Terminal)** ([Live App](https://kavierim.github.io/HotWire-Serial-Terminal/)) — Cross-platform Web Serial & WebUSB terminal for desktop and Android
+
 ## Development
 
 Built with **Rust + WebAssembly** ([Leptos](https://leptos.dev/) CSR + [Trunk](https://trunkrs.dev/)).
