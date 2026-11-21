@@ -1,3 +1,5 @@
+use hotwire_core::protocol::{BoardIdentity, ToolId};
+use hotwire_core::ui::HotWireToolbar;
 use leptos::prelude::*;
 
 use crate::protocol::decoders::{DecoderConfig, DecoderKind};
@@ -5,7 +7,7 @@ use crate::protocol::time_format::{format_duration, format_resolution};
 use crate::protocol::types::{
     PreTriggerRatio, TriggerEdge, CHANNELS, DEPTH_PRESETS, RATE_PRESETS,
 };
-use crate::transport::serial::{ConnectionStatus, TransportSnapshot};
+use crate::transport::serial::TransportSnapshot;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CaptureConfig {
@@ -35,7 +37,7 @@ const UART_BAUD_PRESETS: [u32; 9] = [
 #[component]
 pub fn TopToolbar(
     transport: RwSignal<TransportSnapshot>,
-    device_name: Signal<String>,
+    identity: RwSignal<Option<BoardIdentity>>,
     capture_config: RwSignal<CaptureConfig>,
     capturing: RwSignal<bool>,
     continuous: RwSignal<bool>,
@@ -43,6 +45,8 @@ pub fn TopToolbar(
     decoder_config: RwSignal<DecoderConfig>,
     has_capture: Signal<bool>,
     channel_labels: RwSignal<[String; 8]>,
+    drawer_open: RwSignal<bool>,
+    on_toggle_drawer: Callback<()>,
     on_connect: Callback<()>,
     on_start_demo: Callback<()>,
     on_disconnect: Callback<()>,
@@ -54,21 +58,9 @@ pub fn TopToolbar(
     on_export_csv: Callback<()>,
     on_export_vcd: Callback<()>,
 ) -> impl IntoView {
-    let is_connected = move || transport.get().status == ConnectionStatus::Connected;
+    let is_connected = move || transport.get().status.is_active();
     let is_capture_running = move || capturing.get() || continuous.get();
     let controls_locked = move || capturing.get() && !continuous.get();
-
-    let pill_class = move || match transport.get().status {
-        ConnectionStatus::Connected => "status-pill status-connected",
-        ConnectionStatus::Connecting => "status-pill status-connecting",
-        ConnectionStatus::Waiting => "status-pill status-waiting",
-    };
-
-    let pill_text = move || match transport.get().status {
-        ConnectionStatus::Connected => format!("Connected: {}", device_name.get()),
-        ConnectionStatus::Connecting => "Connecting...".to_string(),
-        ConnectionStatus::Waiting => "Waiting for USB...".to_string(),
-    };
 
     let window_badge = move || {
         let cfg = capture_config.get();
@@ -86,78 +78,29 @@ pub fn TopToolbar(
     };
 
     view! {
+        <HotWireToolbar
+            active_tool=ToolId::LogicAnalyzer
+            subtitle="8-Ch · 20 MHz · Rust/WASM"
+            transport=transport
+            identity=identity
+            on_connect=on_connect
+            on_disconnect=on_disconnect
+            on_start_demo=on_start_demo
+            flasher_open=drawer_open
+            on_toggle_flasher=on_toggle_drawer
+        >
+            <button
+                type="button"
+                class="btn btn-danger release-all-btn"
+                disabled=move || !is_connected() || !has_active_outputs.get()
+                on:click=move |_| on_release_all.run(())
+                title="Release all 8 channels (D0–D7) to High-Z Input (Z) and clear contention flags"
+            >
+                "Release All (Z)"
+            </button>
+        </HotWireToolbar>
+
         <header class="top-toolbar">
-            <div class="toolbar-row toolbar-primary">
-                <div class="brand-group">
-                    <div class="brand-logo" aria-hidden="true">
-                        <svg viewBox="0 0 24 24" width="18" height="18">
-                            <path
-                                d="M2 16h4V8h5v8h4V8h5v8h2"
-                                fill="none"
-                                stroke="#4ade80"
-                                stroke-width="2.2"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                            />
-                        </svg>
-                    </div>
-                    <span class="brand-title">"HotWire Logic Analyzer"</span>
-                    <span class="brand-sub">"8-Ch · Rust/WASM"</span>
-                    <span
-                        class=pill_class
-                        title=move || transport.get().error_message.unwrap_or_default()
-                    >
-                        <span class="status-dot" />
-                        <span class="status-label">{pill_text}</span>
-                    </span>
-                </div>
-
-                <div class="toolbar-actions-right">
-                    <Show
-                        when=move || !is_connected()
-                        fallback=move || {
-                            view! {
-                                <button
-                                    type="button"
-                                    class="btn btn-secondary"
-                                    on:click=move |_| on_disconnect.run(())
-                                    title=move || format!("Disconnect ({})", transport.get().transport.as_str())
-                                >
-                                    "Disconnect"
-                                </button>
-                            }
-                        }
-                    >
-                        <button
-                            type="button"
-                            class="btn btn-primary"
-                            on:click=move |_| on_connect.run(())
-                            title="Connect via browser USB transport (Web Serial / WebUSB)"
-                        >
-                            "Connect"
-                        </button>
-                        <button
-                            type="button"
-                            class="btn btn-secondary"
-                            on:click=move |_| on_start_demo.run(())
-                            title="Launch offline XIAO ESP32-S3 / ESP32-C6 hardware simulator"
-                        >
-                            "Demo"
-                        </button>
-                    </Show>
-
-                    <button
-                        type="button"
-                        class="btn btn-danger release-all-btn"
-                        disabled=move || !is_connected() || !has_active_outputs.get()
-                        on:click=move |_| on_release_all.run(())
-                        title="Release all 8 channels (D0–D7) to High-Z Input (Z) and clear contention flags"
-                    >
-                        "Release All (Z)"
-                    </button>
-                </div>
-            </div>
-
             {move || {
                 transport
                     .get()

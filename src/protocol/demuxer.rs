@@ -1,30 +1,12 @@
-use crate::protocol::codec::{compute_xor_checksum, decode_response_payload};
+use hotwire_core::protocol::{FrameDemuxer, FrameRule};
+
+use crate::protocol::codec::decode_response_payload;
 use crate::protocol::types::{
-    DecodedPacket, MAX_FRAME_PAYLOAD_LEN, PROTOCOL_SYNC_0, PROTOCOL_SYNC_1,
-    TYPE_BOARD_CAPABILITIES, TYPE_LA_CAPTURE_DATA, TYPE_STATUS_TELEMETRY,
+    DecodedPacket, MAX_FRAME_PAYLOAD_LEN, TYPE_LA_CAPTURE_DATA, TYPE_STATUS_TELEMETRY,
 };
 
-fn is_valid_frame_type(type_id: u8) -> bool {
-    matches!(
-        type_id,
-        TYPE_STATUS_TELEMETRY | TYPE_LA_CAPTURE_DATA | TYPE_BOARD_CAPABILITIES
-    )
-}
-
-fn is_valid_length_for_type(type_id: u8, len: usize) -> bool {
-    if len > MAX_FRAME_PAYLOAD_LEN {
-        return false;
-    }
-    match type_id {
-        TYPE_STATUS_TELEMETRY => len == 4,
-        TYPE_LA_CAPTURE_DATA => len >= 8,
-        TYPE_BOARD_CAPABILITIES => (2..=4096).contains(&len),
-        _ => false,
-    }
-}
-
 pub struct ProtocolDemuxer {
-    buffer: Vec<u8>,
+    inner: FrameDemuxer,
 }
 
 impl Default for ProtocolDemuxer {
@@ -35,99 +17,33 @@ impl Default for ProtocolDemuxer {
 
 impl ProtocolDemuxer {
     pub fn new() -> Self {
-        Self { buffer: Vec::new() }
+        Self {
+            inner: FrameDemuxer::new(vec![
+                FrameRule::board_capabilities(),
+                FrameRule::new(TYPE_STATUS_TELEMETRY, 4, 4),
+                FrameRule::new(TYPE_LA_CAPTURE_DATA, 8, MAX_FRAME_PAYLOAD_LEN),
+            ]),
+        }
     }
 
     pub fn reset(&mut self) {
-        self.buffer.clear();
+        self.inner.reset();
     }
 
-    pub fn push<FP, FT>(&mut self, chunk: &[u8], mut on_packet: FP, mut on_text: FT)
+    pub fn push<FP, FT>(&mut self, chunk: &[u8], mut on_packet: FP, on_text: FT)
     where
         FP: FnMut(DecodedPacket),
         FT: FnMut(&[u8]),
     {
-        if chunk.is_empty() {
-            return;
-        }
-        let mut combined = Vec::with_capacity(self.buffer.len() + chunk.len());
-        combined.extend_from_slice(&self.buffer);
-        combined.extend_from_slice(chunk);
-
-        let mut cursor = 0usize;
-        let mut text_start = 0usize;
-        let mut pending_text: Vec<u8> = Vec::new();
-
-        while cursor < combined.len() {
-            if combined[cursor] != PROTOCOL_SYNC_0 {
-                cursor += 1;
-                continue;
-            }
-            if cursor + 1 >= combined.len() {
-                break;
-            }
-            if combined[cursor + 1] != PROTOCOL_SYNC_1 {
-                cursor += 1;
-                continue;
-            }
-            if cursor + 5 > combined.len() {
-                break;
-            }
-
-            let type_id = combined[cursor + 2];
-            let payload_len =
-                (combined[cursor + 3] as usize) | ((combined[cursor + 4] as usize) << 8);
-
-            if !is_valid_frame_type(type_id) || !is_valid_length_for_type(type_id, payload_len) {
-                cursor += 1;
-                continue;
-            }
-
-            let total_frame_len = 6 + payload_len;
-            if cursor + total_frame_len > combined.len() {
-                break;
-            }
-
-            let frame_slice = &combined[cursor..cursor + total_frame_len];
-            let expected_xor = compute_xor_checksum(&frame_slice[..total_frame_len - 1]);
-            let actual_xor = frame_slice[total_frame_len - 1];
-
-            if expected_xor != actual_xor {
-                cursor += 1;
-                continue;
-            }
-
-            let payload = &frame_slice[5..5 + payload_len];
-            let Some(decoded) = decode_response_payload(type_id, payload) else {
-                cursor += 1;
-                continue;
-            };
-
-            if cursor > text_start {
-                pending_text.extend_from_slice(&combined[text_start..cursor]);
-            }
-            if !pending_text.is_empty() {
-                on_text(&pending_text);
-                pending_text.clear();
-            }
-
-            on_packet(decoded);
-            cursor += total_frame_len;
-            text_start = cursor;
-        }
-
-        if cursor > text_start {
-            pending_text.extend_from_slice(&combined[text_start..cursor]);
-        }
-        if !pending_text.is_empty() {
-            on_text(&pending_text);
-        }
-
-        self.buffer = if cursor < combined.len() {
-            combined[cursor..].to_vec()
-        } else {
-            Vec::new()
-        };
+        self.inner.feed_with_text(
+            chunk,
+            |raw| {
+                if let Some(pkt) = decode_response_payload(raw.type_id, raw.payload) {
+                    on_packet(pkt);
+                }
+            },
+            on_text,
+        );
     }
 }
 
@@ -135,7 +51,7 @@ impl ProtocolDemuxer {
 mod tests {
     use super::*;
     use crate::protocol::codec::encode_response_frame;
-    use crate::protocol::types::StatusTelemetry;
+    use crate::protocol::types::{StatusTelemetry, TYPE_BOARD_CAPABILITIES};
 
     #[test]
     fn separates_mixed_utf8_and_binary_packets_across_fragments() {
@@ -172,7 +88,7 @@ mod tests {
             })
         );
         match &packets[1] {
-            DecodedPacket::BoardCapabilities(c) => assert_eq!(c.board, "XIAO-ESP32-S3"),
+            DecodedPacket::BoardCapabilities(_, c) => assert_eq!(c.board, "XIAO-ESP32-S3"),
             _ => panic!("expected capabilities"),
         }
         assert_eq!(

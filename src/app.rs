@@ -1,3 +1,5 @@
+use hotwire_core::protocol::BoardIdentity;
+use hotwire_core::ui::HotWireTheme;
 use leptos::prelude::*;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
@@ -18,9 +20,7 @@ use crate::protocol::time_format::format_signed_duration;
 use crate::protocol::types::{
     BoardCapabilities, CaptureDataFrame, DecodedPacket, StatusTelemetry, RATE_PRESETS,
 };
-use crate::transport::serial::{
-    ConnectionStatus, SerialTransport, TransportKind, TransportSnapshot,
-};
+use crate::transport::serial::{create_logic_transport, TransportSnapshot};
 
 const CHANNEL_LABELS_STORAGE_KEY: &str = "hotwire.channelLabels.v1";
 
@@ -89,10 +89,12 @@ fn download_text_file(filename: &str, content: &str, mime_type: &str) {
 
 #[component]
 pub fn App() -> impl IntoView {
-    let serial_transport = StoredValue::new_local(SerialTransport::new());
+    let serial_transport = StoredValue::new_local(create_logic_transport());
 
     let transport = RwSignal::new(serial_transport.with_value(|t| t.snapshot()));
+    let identity = RwSignal::new(None::<BoardIdentity>);
     let board_caps = RwSignal::new(None::<BoardCapabilities>);
+    let drawer_open = RwSignal::new(false);
     let telemetry = RwSignal::new(StatusTelemetry::default());
     let channel_configs = RwSignal::new([ChannelUiState::default(); 8]);
     let channel_labels = RwSignal::new(load_channel_labels());
@@ -139,7 +141,7 @@ pub fn App() -> impl IntoView {
     };
 
     let trigger_capture = move || {
-        if transport.get_untracked().status != ConnectionStatus::Connected {
+        if !transport.get_untracked().status.is_active() {
             return;
         }
         let cfg = capture_config.get_untracked();
@@ -174,7 +176,7 @@ pub fn App() -> impl IntoView {
             cfg.pre_trigger,
             cfg.blocks_kb,
         );
-        serial_transport.with_value(|t| t.write_bytes(&cmd));
+        serial_transport.with_value(|t| t.send_bytes(&cmd));
     };
 
     let abort_capture = move || {
@@ -182,7 +184,7 @@ pub fn App() -> impl IntoView {
         clear_continuous_timer();
         if capturing.get_untracked() {
             let cmd = build_la_abort_cmd();
-            serial_transport.with_value(|t| t.write_bytes(&cmd));
+            serial_transport.with_value(|t| t.send_bytes(&cmd));
             if let Some(w) = web_sys::window() {
                 if let Some(id) = abort_watchdog.get_value() {
                     w.clear_timeout_with_handle(id);
@@ -206,10 +208,11 @@ pub fn App() -> impl IntoView {
     serial_transport.with_value(|st| {
         st.init(
             move |snap: TransportSnapshot| {
-                let disconnected = snap.status != ConnectionStatus::Connected;
+                let disconnected = !snap.status.is_active();
                 transport.set(snap);
                 if disconnected {
                     demuxer.update_value(|d| d.reset());
+                    identity.set(None);
                     board_caps.set(None);
                     capturing.set(false);
                     continuous.set(false);
@@ -240,7 +243,8 @@ pub fn App() -> impl IntoView {
                                     }
                                 });
                             }
-                            DecodedPacket::BoardCapabilities(caps) => {
+                            DecodedPacket::BoardCapabilities(id, caps) => {
+                                identity.set(Some(id));
                                 board_caps.set(Some(caps));
                             }
                             DecodedPacket::LaCaptureData(cap) => {
@@ -249,7 +253,7 @@ pub fn App() -> impl IntoView {
                                 selected_frame_id.set(None);
                                 capturing.set(false);
                                 if continuous.get_untracked()
-                                    && transport.get_untracked().status == ConnectionStatus::Connected
+                                    && transport.get_untracked().status.is_active()
                                 {
                                     clear_continuous_timer();
                                     if let Some(w) = web_sys::window() {
@@ -293,7 +297,7 @@ pub fn App() -> impl IntoView {
             let code = ev.code();
             let key = ev.key();
             if code == "Space" {
-                if transport.get_untracked().status != ConnectionStatus::Connected {
+                if !transport.get_untracked().status.is_active() {
                     return;
                 }
                 ev.prevent_default();
@@ -340,22 +344,17 @@ pub fn App() -> impl IntoView {
         decode_protocol(&cap.samples, cap.sample_rate_hz, cfg)
     });
 
-    let connected = Signal::derive(move || transport.get().status == ConnectionStatus::Connected);
-    let is_demo = Signal::derive(move || transport.get().transport == TransportKind::Demo);
-    let device_name = Signal::derive(move || {
-        board_caps
-            .get()
-            .map(|c| c.board)
-            .unwrap_or_else(|| transport.get().device_name)
-    });
+    let connected = Signal::derive(move || transport.get().status.is_active());
     let has_active_outputs = Signal::derive(move || {
         let t = telemetry.get();
         t.force_enable_mask != 0 || t.contention_mask != 0
     });
     let has_capture = Signal::derive(move || capture.get().is_some());
 
-    let on_connect = Callback::new(move |_| serial_transport.with_value(|t| t.connect()));
+    let on_connect = Callback::new(move |_| serial_transport.with_value(|t| t.connect_usb()));
     let on_start_demo = Callback::new(move |_| serial_transport.with_value(|t| t.start_demo()));
+    let on_toggle_drawer = Callback::new(move |_| drawer_open.update(|v| *v = !*v));
+    let on_close_drawer = Callback::new(move |_| drawer_open.set(false));
     let on_disconnect = Callback::new(move |_| {
         continuous.set(false);
         capturing.set(false);
@@ -366,7 +365,7 @@ pub fn App() -> impl IntoView {
     let on_release_all = Callback::new(move |_| {
         channel_configs.set([ChannelUiState::default(); 8]);
         let cmd = build_release_all_cmd();
-        serial_transport.with_value(|t| t.write_bytes(&cmd));
+        serial_transport.with_value(|t| t.send_bytes(&cmd));
     });
     let on_capture = Callback::new(move |_| trigger_capture());
     let on_abort = Callback::new(move |_| abort_capture());
@@ -406,7 +405,7 @@ pub fn App() -> impl IntoView {
             };
         });
         let cmd = build_pin_force_cmd(req.ch as u8, req.mode, req.pull, req.protect);
-        serial_transport.with_value(|t| t.write_bytes(&cmd));
+        serial_transport.with_value(|t| t.send_bytes(&cmd));
     });
     let on_rename_channel = Callback::new(move |(ch, alias): (usize, String)| {
         channel_labels.update(|labels| {
@@ -423,10 +422,11 @@ pub fn App() -> impl IntoView {
     });
 
     view! {
+        <HotWireTheme />
         <div class="app-shell">
             <TopToolbar
                 transport=transport
-                device_name=device_name
+                identity=identity
                 capture_config=capture_config
                 capturing=capturing
                 continuous=continuous
@@ -434,6 +434,8 @@ pub fn App() -> impl IntoView {
                 decoder_config=decoder_config
                 has_capture=has_capture
                 channel_labels=channel_labels
+                drawer_open=drawer_open
+                on_toggle_drawer=on_toggle_drawer
                 on_connect=on_connect
                 on_start_demo=on_start_demo
                 on_disconnect=on_disconnect
@@ -538,8 +540,9 @@ pub fn App() -> impl IntoView {
             }}
 
             <BottomDrawer
-                connected=connected
-                is_demo=is_demo
+                open=drawer_open
+                on_close=on_close_drawer
+                identity=identity
                 serial_transport=serial_transport
             />
         </div>

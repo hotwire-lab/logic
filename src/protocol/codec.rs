@@ -1,37 +1,12 @@
+pub use hotwire_core::protocol::{
+    build_bootloader_cmd_zero as build_bootloader_cmd, build_get_caps_cmd, build_ping_status_cmd,
+    encode_command_8 as build_command_frame, encode_frame as encode_response_frame,
+};
+#[cfg(test)]
+use hotwire_core::protocol::compute_xor_checksum;
 use serde::Deserialize;
 
 use crate::protocol::types::*;
-
-pub fn compute_xor_checksum(bytes: &[u8]) -> u8 {
-    let mut xor = 0u8;
-    for &b in bytes {
-        xor ^= b;
-    }
-    xor
-}
-
-pub fn build_command_frame(cmd_id: u8, p1: u8, p2: u8, p3: u8, p4: u8) -> [u8; 8] {
-    let mut frame = [
-        PROTOCOL_SYNC_0,
-        PROTOCOL_SYNC_1,
-        cmd_id,
-        p1,
-        p2,
-        p3,
-        p4,
-        0,
-    ];
-    frame[7] = compute_xor_checksum(&frame[..7]);
-    frame
-}
-
-pub fn build_ping_status_cmd() -> [u8; 8] {
-    build_command_frame(CMD_PING_STATUS, 0, 0, 0, 0)
-}
-
-pub fn build_get_caps_cmd() -> [u8; 8] {
-    build_command_frame(CMD_GET_CAPS, 0, 0, 0, 0)
-}
 
 pub fn build_pin_force_cmd(
     channel: u8,
@@ -91,25 +66,6 @@ pub fn build_la_abort_cmd() -> [u8; 8] {
     build_command_frame(CMD_LA_ABORT, 0, 0, 0, 0)
 }
 
-#[allow(dead_code)]
-pub fn build_bootloader_cmd() -> [u8; 8] {
-    build_command_frame(CMD_BOOTLOADER, 0, 0, 0, 0)
-}
-
-pub fn encode_response_frame(type_id: u8, payload: &[u8]) -> Vec<u8> {
-    let len = payload.len();
-    let mut frame = Vec::with_capacity(6 + len);
-    frame.push(PROTOCOL_SYNC_0);
-    frame.push(PROTOCOL_SYNC_1);
-    frame.push(type_id);
-    frame.push((len & 0xff) as u8);
-    frame.push(((len >> 8) & 0xff) as u8);
-    frame.extend_from_slice(payload);
-    let chk = compute_xor_checksum(&frame);
-    frame.push(chk);
-    frame
-}
-
 pub fn decode_status_telemetry(payload: &[u8]) -> Option<StatusTelemetry> {
     if payload.len() != 4 {
         return None;
@@ -153,17 +109,18 @@ struct RawBoardCaps {
     pins: Option<Vec<BoardPinMapping>>,
 }
 
-pub fn decode_board_capabilities(payload: &[u8]) -> Option<BoardCapabilities> {
-    let text = std::str::from_utf8(payload).ok()?;
-    let parsed: RawBoardCaps = serde_json::from_str(text).ok()?;
-    Some(BoardCapabilities {
+pub fn decode_board_capabilities(payload: &[u8]) -> Option<(BoardIdentity, BoardCapabilities)> {
+    let identity = BoardIdentity::decode_capabilities(payload)?;
+    let parsed: RawBoardCaps = serde_json::from_value(identity.raw.clone()).ok()?;
+    let caps = BoardCapabilities {
         board: parsed.board,
         firmware: parsed.firmware,
         channels: parsed.channels,
         max_rate_hz: parsed.max_rate_hz.unwrap_or(20_000_000),
         max_depth: parsed.max_depth.unwrap_or(32768),
         pins: parsed.pins.unwrap_or_default(),
-    })
+    };
+    Some((identity, caps))
 }
 
 pub fn decode_response_payload(type_id: u8, payload: &[u8]) -> Option<DecodedPacket> {
@@ -172,9 +129,8 @@ pub fn decode_response_payload(type_id: u8, payload: &[u8]) -> Option<DecodedPac
             decode_status_telemetry(payload).map(DecodedPacket::StatusTelemetry)
         }
         TYPE_LA_CAPTURE_DATA => decode_capture_data(payload).map(DecodedPacket::LaCaptureData),
-        TYPE_BOARD_CAPABILITIES => {
-            decode_board_capabilities(payload).map(DecodedPacket::BoardCapabilities)
-        }
+        TYPE_BOARD_CAPABILITIES => decode_board_capabilities(payload)
+            .map(|(id, caps)| DecodedPacket::BoardCapabilities(id, caps)),
         _ => None,
     }
 }
@@ -271,7 +227,7 @@ mod tests {
         assert!(decode_capture_data(&timeout_payload).unwrap().auto_triggered);
 
         let json = br#"{"board":"XIAO-ESP32-S3","channels":8,"maxRateHz":20000000,"maxDepth":32768,"pins":[{"ch":0,"label":"D0","gpio":1}]}"#;
-        let caps = decode_board_capabilities(json).expect("valid caps");
+        let (_, caps) = decode_board_capabilities(json).expect("valid caps");
         assert_eq!(caps.board, "XIAO-ESP32-S3");
         assert_eq!(caps.max_depth, 32768);
     }
