@@ -10,18 +10,72 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>HotWire Logic Analyzer — 8-Ch 20 MHz Pocket Lab &amp; Force I/O (XIAO ESP32-S3 / C6)</title>
     <meta
       name="description"
-      content="HotWire Pocket Lab — 8-Channel Logic Analyzer &amp; Tri-State Force I/O PWA for XIAO ESP32-S3 / ESP32-C6 (Rust/WebAssembly)"
+      content="Zero-install browser 8-channel 20 MHz Logic Analyzer, Tri-State Force I/O &amp; UART/SPI/I2C Protocol Decoder PWA for Seeed Studio XIAO ESP32-S3 and XIAO ESP32-C6 via Web Serial &amp; WebUSB (Rust/WASM)."
     />
+    <meta
+      name="keywords"
+      content="ESP32-S3 logic analyzer, ESP32-C6 logic analyzer, XIAO ESP32-S3 pocket lab, Web Serial logic analyzer, WebUSB logic analyzer, UART SPI I2C decoder, Rust WebAssembly, Leptos, HotWire Logic Analyzer"
+    />
+    <meta name="author" content="Kari Vierimaa, Kempele" />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://kavierim.github.io/HotWire-Logic-Analyzer/" />
+
+    <!-- Open Graph / Social Preview -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="HotWire Logic Analyzer" />
+    <meta property="og:url" content="https://kavierim.github.io/HotWire-Logic-Analyzer/" />
+    <meta property="og:title" content="HotWire Logic Analyzer — 8-Ch 20 MHz Pocket Lab &amp; Force I/O" />
+    <meta
+      property="og:description"
+      content="Turn a $5 XIAO ESP32-S3 or C6 into an 8-channel 20 MHz Logic Analyzer with Tri-State Force I/O, UART/SPI/I2C decoders, A/B cursors &amp; offline Demo mode."
+    />
+    <meta property="og:image" content="https://kavierim.github.io/HotWire-Logic-Analyzer/og-preview.png" />
+
+    <!-- Twitter / X Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="HotWire Logic Analyzer — 8-Ch 20 MHz Pocket Lab &amp; Force I/O" />
+    <meta
+      name="twitter:description"
+      content="Zero-install Rust/WASM 8-channel 20 MHz Logic Analyzer &amp; Tri-State Force I/O PWA for XIAO ESP32-S3 &amp; C6."
+    />
+    <meta name="twitter:image" content="https://kavierim.github.io/HotWire-Logic-Analyzer/og-preview.png" />
+
+    <!-- Structured Data for Search Engines -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "HotWire Logic Analyzer",
+        "operatingSystem": "Web, Windows, macOS, Linux, Android",
+        "applicationCategory": "UtilitiesApplication",
+        "url": "https://kavierim.github.io/HotWire-Logic-Analyzer/",
+        "screenshot": "https://kavierim.github.io/HotWire-Logic-Analyzer/og-preview.png",
+        "description": "Zero-install 8-channel 20 MHz Logic Analyzer, Tri-State Force I/O, and UART/SPI/I2C Protocol Decoder PWA for Seeed Studio XIAO ESP32-S3 and XIAO ESP32-C6.",
+        "author": {
+          "@type": "Person",
+          "name": "Kari Vierimaa"
+        },
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        }
+      }
+    </script>
+
     <link rel="icon" type="image/svg+xml" href="./icon.svg" />
     <link rel="manifest" href="./manifest.webmanifest" />
-    <title>HotWire Pocket Lab — 8-Ch Logic Analyzer &amp; Tri-State Force I/O</title>
 
     <link data-trunk rel="css" href="styles.css" />
     <link data-trunk rel="copy-dir" href="public/firmware" />
     <link data-trunk rel="copy-file" href="public/icon.svg" />
     <link data-trunk rel="copy-file" href="public/manifest.webmanifest" />
+    <link data-trunk rel="copy-file" href="public/og-preview.png" />
+    <link data-trunk rel="copy-file" href="public/robots.txt" />
+    <link data-trunk rel="copy-file" href="public/sitemap.xml" />
     <link data-trunk rel="copy-file" href="public/sw.js" />
     <link data-trunk rel="copy-file" href="public/.nojekyll" />
     <link data-trunk rel="rust" />
