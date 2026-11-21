@@ -49,3 +49,7 @@ cargo test
 trunk serve          # local dev server (http://127.0.0.1:8081)
 trunk build --release
 ```
+
+## License
+
+Copyright © 2026 Kari Vierimaa, Kempele — Licensed under the [Apache License 2.0](LICENSE).
