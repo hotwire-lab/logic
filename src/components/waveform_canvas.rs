@@ -1,5 +1,6 @@
-use std::collections::HashMap;
-
+use hotwire_core::ui::{
+    apply_anchored_zoom, apply_horizontal_pan, GestureDelta, PinchPanTracker,
+};
 use leptos::html;
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
@@ -168,11 +169,9 @@ pub fn WaveformCanvas(
 
     let prev_capture_len = StoredValue::new(0usize);
     let minimap_cache = StoredValue::new(None::<MinimapActivity>);
-    let active_pointers = StoredValue::new(HashMap::<i32, (f64, f64)>::new());
+    let gesture_tracker = StoredValue::new(PinchPanTracker::new());
     let drag_mode = StoredValue::new(DragMode::None);
-    let pan_start = StoredValue::new((0.0f64, 0.0f64));
     let down_pos = StoredValue::new((0.0f64, 0.0f64, false));
-    let pinch_start = StoredValue::new((1.0f64, 0.0f64, 0.0f64, 1024.0f64));
 
     let get_canvas_dims = move || -> (f64, f64) {
         if let Some(c) = canvas_ref.get_untracked() {
@@ -192,12 +191,16 @@ pub fn WaveformCanvas(
         }
         let (width_px, _) = get_canvas_dims();
         let total = cap.samples.len();
+        let total_f = total.max(1) as f64;
+        let max_zoom = (total_f / 4.0).max(1.0);
+        let scale_factor = if factor > 0.0 { 1.0 / factor } else { 1.0 };
         view.update(|v| {
-            let frac = (x_px / width_px.max(1.0)).clamp(0.0, 1.0);
-            let anchor = v.start_sample + frac * v.visible_samples;
-            let next_vis = v.visible_samples * factor;
-            let next_start = anchor - frac * next_vis;
-            *v = clamp_view(next_start, next_vis, total);
+            let cur_zoom = (total_f / v.visible_samples.max(1.0)).clamp(1.0, max_zoom);
+            let cur_pan = (v.start_sample / total_f).clamp(0.0, 1.0);
+            let anchor = (x_px / width_px.max(1.0)).clamp(0.0, 1.0);
+            let (next_z, next_pan) =
+                apply_anchored_zoom(cur_zoom, cur_pan, scale_factor, anchor, 1.0, max_zoom);
+            *v = clamp_view(next_pan * total_f, total_f / next_z, total);
         });
     };
 
@@ -926,19 +929,14 @@ pub fn WaveformCanvas(
         let _ = canvas.set_pointer_capture(ev.pointer_id());
 
         let mut ptr_count = 0usize;
-        active_pointers.update_value(|m| {
-            m.insert(ev.pointer_id(), (x, y));
-            ptr_count = m.len();
+        gesture_tracker.update_value(|gt| {
+            gt.pointer_down(ev.pointer_id(), x, y);
+            ptr_count = gt.active_count();
         });
         down_pos.set_value((x, y, false));
 
-        if ptr_count == 2 {
-            let pts: Vec<(f64, f64)> = active_pointers.with_value(|m| m.values().copied().collect());
-            let dist = ((pts[1].0 - pts[0].0).hypot(pts[1].1 - pts[0].1)).max(8.0);
-            let mid_x = (pts[0].0 + pts[1].0) / 2.0;
-            let v = view.get_untracked();
+        if ptr_count >= 2 {
             drag_mode.set_value(DragMode::Pinch);
-            pinch_start.set_value((dist, mid_x, v.start_sample, v.visible_samples));
             return;
         }
 
@@ -972,7 +970,6 @@ pub fn WaveformCanvas(
         }
 
         drag_mode.set_value(DragMode::Pan);
-        pan_start.set_value((x, view.get_untracked().start_sample));
     };
 
     let on_pointer_move = move |ev: web_sys::PointerEvent| {
@@ -991,8 +988,15 @@ pub fn WaveformCanvas(
         let x = ev.client_x() as f64 - rect.left();
         let y = ev.client_y() as f64 - rect.top();
 
-        let has_ptr = active_pointers.with_value(|m| m.contains_key(&ev.pointer_id()));
-        if !has_ptr {
+        let mut gesture_delta = None;
+        let mut active_cnt = 0usize;
+        gesture_tracker.update_value(|gt| {
+            active_cnt = gt.active_count();
+            if active_cnt > 0 {
+                gesture_delta = gt.pointer_move(ev.pointer_id(), x, y);
+            }
+        });
+        if active_cnt == 0 {
             if y >= TOP_HEIGHT {
                 let ch = y_to_channel(y, height);
                 let sample_idx = x_to_sample(x, width);
@@ -1014,27 +1018,28 @@ pub fn WaveformCanvas(
             down_pos.set_value((dx0, dy0, true));
         }
 
-        active_pointers.update_value(|m| {
-            m.insert(ev.pointer_id(), (x, y));
-        });
-
         let mode = drag_mode.get_value();
         let total = cap.samples.len();
+        let total_f = total.max(1) as f64;
+        let max_zoom = (total_f / 4.0).max(1.0);
 
         match mode {
             DragMode::Pinch => {
-                let pts: Vec<(f64, f64)> =
-                    active_pointers.with_value(|m| m.values().copied().collect());
-                if pts.len() >= 2 {
-                    let dist = ((pts[1].0 - pts[0].0).hypot(pts[1].1 - pts[0].1)).max(8.0);
-                    let mid_x = (pts[0].0 + pts[1].0) / 2.0;
-                    let (p_dist, p_mid_x, p_start, p_vis) = pinch_start.get_value();
-                    let scale = p_dist / dist;
-                    let new_vis = p_vis * scale;
-                    let anchor_frac = (p_mid_x / width).clamp(0.0, 1.0);
-                    let anchor_sample = p_start + anchor_frac * p_vis;
-                    let cur_mid_frac = (mid_x / width).clamp(0.0, 1.0);
-                    view.set(clamp_view(anchor_sample - cur_mid_frac * new_vis, new_vis, total));
+                if let Some(GestureDelta::Pinch {
+                    scale_ratio,
+                    center_x,
+                    pan_dx,
+                    ..
+                }) = gesture_delta
+                {
+                    let v = view.get_untracked();
+                    let cur_zoom = (total_f / v.visible_samples.max(1.0)).clamp(1.0, max_zoom);
+                    let cur_pan = (v.start_sample / total_f).clamp(0.0, 1.0);
+                    let anchor = (center_x / width).clamp(0.0, 1.0);
+                    let (next_z, zoomed_pan) =
+                        apply_anchored_zoom(cur_zoom, cur_pan, scale_ratio, anchor, 1.0, max_zoom);
+                    let panned = apply_horizontal_pan(next_z, zoomed_pan, pan_dx, width);
+                    view.set(clamp_view(panned * total_f, total_f / next_z, total));
                 }
             }
             DragMode::Minimap => scrub_minimap(x, width),
@@ -1053,11 +1058,13 @@ pub fn WaveformCanvas(
                 cursor_b.set(snap_cursor_sample(x, y, width, height, ev.alt_key()));
             }
             DragMode::Pan => {
-                let (px0, s0) = pan_start.get_value();
-                let dx = x - px0;
-                let v = view.get_untracked();
-                let d_samples = (dx / width) * v.visible_samples;
-                view.set(clamp_view(s0 - d_samples, v.visible_samples, total));
+                if let Some(GestureDelta::Pan { dx, .. }) = gesture_delta {
+                    let v = view.get_untracked();
+                    let cur_zoom = (total_f / v.visible_samples.max(1.0)).clamp(1.0, max_zoom);
+                    let cur_pan = (v.start_sample / total_f).clamp(0.0, 1.0);
+                    let next_pan = apply_horizontal_pan(cur_zoom, cur_pan, dx, width);
+                    view.set(clamp_view(next_pan * total_f, v.visible_samples, total));
+                }
             }
             DragMode::None => {}
         }
@@ -1101,19 +1108,18 @@ pub fn WaveformCanvas(
             }
         }
 
-        let mut remaining = Vec::new();
-        active_pointers.update_value(|m| {
-            m.remove(&ev.pointer_id());
-            remaining = m.values().copied().collect::<Vec<_>>();
+        let mut remaining = 0usize;
+        gesture_tracker.update_value(|gt| {
+            gt.pointer_up(ev.pointer_id());
+            remaining = gt.active_count();
         });
         snap_marker.set(None);
 
-        if drag_mode.get_value() == DragMode::Pinch && remaining.len() == 1 {
+        if drag_mode.get_value() == DragMode::Pinch && remaining == 1 {
             drag_mode.set_value(DragMode::Pan);
-            pan_start.set_value((remaining[0].0, view.get_untracked().start_sample));
             return;
         }
-        if remaining.is_empty() {
+        if remaining == 0 {
             drag_mode.set_value(DragMode::None);
         }
     };
