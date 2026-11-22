@@ -45,6 +45,7 @@ pub fn ChannelStrip(
     let pulse_restore = StoredValue::new(HashMap::<usize, (PinForceMode, PinPullMode)>::new());
     let editing_ch = RwSignal::new(None::<usize>);
     let draft_alias = RwSignal::new(String::new());
+    let mobile_expanded = RwSignal::new(false);
 
     let commit_alias = move |ch: usize| {
         editing_ch.set(None);
@@ -52,13 +53,51 @@ pub fn ChannelStrip(
     };
 
     view! {
-        <aside class="channel-strip" aria-label="8-channel tri-state force controls">
+        <Show when=move || mobile_expanded.get()>
+            <div
+                class="channel-strip-backdrop"
+                aria-hidden="true"
+                on:click=move |_| mobile_expanded.set(false)
+            />
+        </Show>
+
+        <aside
+            class=move || {
+                if mobile_expanded.get() {
+                    "channel-strip mobile-expanded"
+                } else {
+                    "channel-strip"
+                }
+            }
+            aria-label="8-channel tri-state force controls"
+        >
             <div class="channel-strip-header">
-                <span>"CH / GPIO"</span>
-                <span>"LIVE"</span>
-                <span>"FORCE"</span>
-                <span>"PULSE"</span>
-                <span>"PULL"</span>
+                <button
+                    type="button"
+                    class=move || {
+                        if mobile_expanded.get() {
+                            "mobile-io-toggle active"
+                        } else {
+                            "mobile-io-toggle"
+                        }
+                    }
+                    aria-expanded=move || mobile_expanded.get().to_string()
+                    title=move || {
+                        if mobile_expanded.get() {
+                            "Collapse Force I/O controls"
+                        } else {
+                            "Expand Force I/O (Z / 0 / 1, Pulse, Pull) controls"
+                        }
+                    }
+                    on:click=move |_| mobile_expanded.update(|v| *v = !*v)
+                >
+                    {move || if mobile_expanded.get() { "✕ I/O" } else { "I/O ▸" }}
+                </button>
+                <span class="ch-hdr-id">"CH / GPIO"</span>
+                <span class="ch-hdr-live">"LIVE"</span>
+                <span class="ch-hdr-force">"FORCE"</span>
+                <span class="ch-hdr-pulse">"PULSE"</span>
+                <span class="ch-hdr-pull">"PULL"</span>
             </div>
 
             <div class="channel-rows">
@@ -195,10 +234,12 @@ pub fn ChannelStrip(
                                             view! {
                                                 <span
                                                     class=move || {
-                                                        if phys_high() {
-                                                            "live-badge live-high"
-                                                        } else {
-                                                            "live-badge live-low"
+                                                        let forced = effective_mode() != 0;
+                                                        match (phys_high(), forced) {
+                                                            (true, true) => "live-badge live-high live-forced",
+                                                            (true, false) => "live-badge live-high",
+                                                            (false, true) => "live-badge live-low live-forced",
+                                                            (false, false) => "live-badge live-low",
                                                         }
                                                     }
                                                     title=move || {

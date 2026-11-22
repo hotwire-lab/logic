@@ -370,25 +370,25 @@ pub fn WaveformCanvas(
         let lane_height = ((height - TOP_HEIGHT) / 8.0).max(16.0);
 
         // 1. Backgrounds
-        ctx.set_fill_style_str("#0D1117");
+        ctx.set_fill_style_str("#0B0E12");
         ctx.fill_rect(0.0, 0.0, width, height);
-        ctx.set_fill_style_str("#0B0F14");
+        ctx.set_fill_style_str("#0E1217");
         ctx.fill_rect(0.0, 0.0, width, MINIMAP_HEIGHT);
-        ctx.set_fill_style_str("#161B22");
+        ctx.set_fill_style_str("#11151B");
         ctx.fill_rect(0.0, MINIMAP_HEIGHT, width, RULER_HEIGHT);
 
         for ch in 0..8 {
             let y_top = TOP_HEIGHT + (ch as f64) * lane_height;
             ctx.set_fill_style_str(if ch == cur_active_ch && cur_cap.is_some() {
-                "rgba(88, 166, 255, 0.06)"
+                "rgba(88, 166, 255, 0.07)"
             } else if ch % 2 == 0 {
-                "#0D1117"
+                "#0B0E12"
             } else {
-                "#10161F"
+                "#0F131A"
             });
             ctx.fill_rect(0.0, y_top, width, lane_height);
 
-            ctx.set_stroke_style_str("#21262D");
+            ctx.set_stroke_style_str("#1B212B");
             ctx.set_line_width(1.0);
             ctx.begin_path();
             ctx.move_to(0.0, y_top);
@@ -396,7 +396,7 @@ pub fn WaveformCanvas(
             ctx.stroke();
         }
 
-        ctx.set_stroke_style_str("#262C36");
+        ctx.set_stroke_style_str("#232A35");
         ctx.set_line_width(1.0);
         ctx.begin_path();
         ctx.move_to(0.0, MINIMAP_HEIGHT - 0.5);
@@ -406,8 +406,8 @@ pub fn WaveformCanvas(
         ctx.stroke();
 
         let Some(ref cap) = cur_cap else {
-            ctx.set_fill_style_str("#8B949E");
-            ctx.set_font("13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace");
+            ctx.set_fill_style_str("#7D8796");
+            ctx.set_font("12.5px 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace");
             ctx.set_text_align("center");
             ctx.set_text_baseline("middle");
             let msg = if is_capturing {
@@ -485,7 +485,7 @@ pub fn WaveformCanvas(
         let first_tick_k = (t_start_sec / step_sec).ceil() as i64;
         let last_tick_k = (t_end_sec / step_sec).floor() as i64;
 
-        ctx.set_font("11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace");
+        ctx.set_font("11px 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace");
         ctx.set_text_baseline("middle");
         ctx.set_text_align("left");
 
@@ -633,7 +633,7 @@ pub fn WaveformCanvas(
         // 3b. Inline Protocol Decoder Bubbles
         if !frames.is_empty() {
             ctx.save();
-            ctx.set_font("600 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace");
+            ctx.set_font("600 10px 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace");
             ctx.set_text_align("center");
             ctx.set_text_baseline("middle");
 
