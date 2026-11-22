@@ -783,9 +783,27 @@ body,
 
 /* Mobile Layout (360–430px portrait phones & narrow viewports) */
 @media (max-width: 720px) {
+  .mobile-capture-btn {
+    padding: 4px 10px;
+    min-height: 36px;
+  }
+
+  .mobile-controls-btn {
+    min-width: 36px;
+    min-height: 36px;
+    padding: 0 8px;
+    font-size: 15px;
+    line-height: 1;
+  }
+
   .top-toolbar {
+    display: none;
     padding: 5px max(8px, env(safe-area-inset-right)) 5px max(8px, env(safe-area-inset-left));
     gap: 4px;
+  }
+
+  .top-toolbar.mobile-open {
+    display: flex;
   }
 
   .toolbar-row {

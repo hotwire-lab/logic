@@ -61,6 +61,17 @@ pub fn TopToolbar(
     let is_connected = move || transport.get().status.is_active();
     let is_capture_running = move || capturing.get() || continuous.get();
     let controls_locked = move || capturing.get() && !continuous.get();
+    let controls_open = RwSignal::new(false);
+
+    // Notify WaveformCanvas to redraw whenever the mobile controls bar toggles
+    Effect::new(move |_| {
+        let _ = controls_open.get();
+        if let Some(w) = web_sys::window() {
+            if let Ok(ev) = web_sys::Event::new("resize") {
+                let _ = w.dispatch_event(&ev);
+            }
+        }
+    });
 
     let window_badge = move || {
         let cfg = capture_config.get();
@@ -91,16 +102,65 @@ pub fn TopToolbar(
         >
             <button
                 type="button"
-                class="btn btn-danger release-all-btn"
+                class="btn btn-danger release-all-btn hw-desktop-only"
                 disabled=move || !is_connected() || !has_active_outputs.get()
                 on:click=move |_| on_release_all.run(())
                 title="Release all 8 channels (D0–D7) to High-Z Input (Z) and clear contention flags"
             >
                 "Release All (Z)"
             </button>
+
+            <Show
+                when=move || !is_capture_running()
+                fallback=move || {
+                    view! {
+                        <button
+                            type="button"
+                            class="btn btn-danger hw-mobile-only mobile-capture-btn"
+                            on:click=move |_| on_abort.run(())
+                            title="Abort ongoing capture and retrieve partial buffer (Space)"
+                        >
+                            "Abort"
+                        </button>
+                    }
+                }
+            >
+                <button
+                    type="button"
+                    class="btn btn-accent hw-mobile-only mobile-capture-btn"
+                    disabled=move || !is_connected()
+                    on:click=move |_| on_capture.run(())
+                    title="Start single capture (Space)"
+                >
+                    "Capture"
+                </button>
+            </Show>
+
+            <button
+                type="button"
+                class=move || {
+                    if controls_open.get() {
+                        "btn btn-secondary hw-mobile-only mobile-controls-btn active"
+                    } else {
+                        "btn btn-secondary hw-mobile-only mobile-controls-btn"
+                    }
+                }
+                aria-label="Toggle capture controls"
+                aria-expanded=move || if controls_open.get() { "true" } else { "false" }
+                on:click=move |_| controls_open.update(|v| *v = !*v)
+                title="Toggle capture, trigger & decoder controls"
+            >
+                "⚙"
+            </button>
         </HotWireToolbar>
 
-        <header class="top-toolbar">
+        <header class=move || {
+            if controls_open.get() {
+                "top-toolbar mobile-open"
+            } else {
+                "top-toolbar"
+            }
+        }>
             <div class="toolbar-row toolbar-capture">
                 <div class="capture-control-group">
                     <label class="ctrl-field">
@@ -555,6 +615,16 @@ pub fn TopToolbar(
                         title="Continuous capture loop"
                     >
                         "Continuous"
+                    </button>
+
+                    <button
+                        type="button"
+                        class="btn btn-danger hw-mobile-only"
+                        disabled=move || !is_connected() || !has_active_outputs.get()
+                        on:click=move |_| on_release_all.run(())
+                        title="Release all 8 channels (D0–D7) to High-Z Input (Z) and clear contention flags"
+                    >
+                        "Release All (Z)"
                     </button>
 
                     <Show when=move || has_capture.get()>
