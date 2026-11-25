@@ -46,7 +46,7 @@ pub fn BottomDrawer(
             <div class="drawer-col">
                 <h4>"8-Channel Pin Mapping (3.3 V Logic)"</h4>
                 <p class="hw-flash-hint">
-                    "XIAO ESP32-S3: D0–D5 → GPIO1–6, D6–D7 → GPIO43–44. Internal USB pins (GPIO19, GPIO20) are never touched."
+                    "XIAO ESP32-S3: D0–D5 → GPIO1–6, D6–D7 → GPIO43–44. XIAO ESP32-C6: D0–D2 → GPIO0–2, D3–D5 → GPIO21–23, D6–D7 → GPIO16–17. Internal USB pins are never touched."
                 </p>
                 <p class="hw-flash-hint">
                     "Tri-State Force I/O includes automatic 20 ms bus contention auto-cutoff (SHORT!) to protect external drivers."

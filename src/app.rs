@@ -78,14 +78,13 @@ fn download_text_file(filename: &str, content: &str, mime_type: &str) {
         }
     }
     let url_clone = url.clone();
-    let cb = Closure::once(move || {
+    let cb = Closure::once_into_js(move || {
         let _ = web_sys::Url::revoke_object_url(&url_clone);
     });
     let _ = win.set_timeout_with_callback_and_timeout_and_arguments_0(
         cb.as_ref().unchecked_ref(),
         1000,
     );
-    cb.forget();
 }
 
 #[component]
@@ -160,9 +159,10 @@ pub fn App() -> impl IntoView {
                 .map(|r| r.hz)
                 .unwrap_or(1_000_000) as f64;
             let timeout_ms = (((cfg.blocks_kb as f64 * 1024.0) / rate_hz) * 1000.0).ceil() as i32 + 6500;
-            let cb = Closure::once(move || {
+            let cb = Closure::once_into_js(move || {
                 capture_watchdog.set_value(None);
                 capturing.set(false);
+                continuous.set(false);
             });
             if let Ok(id) = w.set_timeout_with_callback_and_timeout_and_arguments_0(
                 cb.as_ref().unchecked_ref(),
@@ -170,7 +170,6 @@ pub fn App() -> impl IntoView {
             ) {
                 capture_watchdog.set_value(Some(id));
             }
-            cb.forget();
         }
 
         let cmd = build_la_capture_cmd(
@@ -193,7 +192,7 @@ pub fn App() -> impl IntoView {
                 if let Some(id) = abort_watchdog.get_value() {
                     w.clear_timeout_with_handle(id);
                 }
-                let cb = Closure::once(move || {
+                let cb = Closure::once_into_js(move || {
                     abort_watchdog.set_value(None);
                     capturing.set(false);
                 });
@@ -203,7 +202,6 @@ pub fn App() -> impl IntoView {
                 ) {
                     abort_watchdog.set_value(Some(id));
                 }
-                cb.forget();
             }
         }
     };
@@ -249,20 +247,38 @@ pub fn App() -> impl IntoView {
                             DecodedPacket::StatusTelemetry(tel) => {
                                 if telemetry.get_untracked() != tel {
                                     telemetry.set(tel);
-                                }
-                                channel_configs.update(|cfgs| {
-                                    for (ch, cfg) in cfgs.iter_mut().enumerate() {
-                                        let bit = 1u8 << ch;
-                                        let is_forced = (tel.force_enable_mask & bit) != 0;
-                                        let is_high = (tel.forced_levels & bit) != 0;
-                                        let next_mode = if is_forced {
-                                            if is_high { 2 } else { 1 }
-                                        } else {
-                                            0
-                                        };
-                                        cfg.mode = next_mode;
+                                    let needs_cfg_update = channel_configs.with_untracked(|cfgs| {
+                                        cfgs.iter().enumerate().any(|(ch, cfg)| {
+                                            let bit = 1u8 << ch;
+                                            let is_forced = (tel.force_enable_mask & bit) != 0;
+                                            let is_high = (tel.forced_levels & bit) != 0;
+                                            let next_mode = if is_forced {
+                                                if is_high { 2 } else { 1 }
+                                            } else {
+                                                0
+                                            };
+                                            let contended = (tel.contention_mask & bit) != 0;
+                                            cfg.mode != next_mode || (contended && cfg.pull != 0)
+                                        })
+                                    });
+                                    if needs_cfg_update {
+                                        channel_configs.update(|cfgs| {
+                                            for (ch, cfg) in cfgs.iter_mut().enumerate() {
+                                                let bit = 1u8 << ch;
+                                                let is_forced = (tel.force_enable_mask & bit) != 0;
+                                                let is_high = (tel.forced_levels & bit) != 0;
+                                                cfg.mode = if is_forced {
+                                                    if is_high { 2 } else { 1 }
+                                                } else {
+                                                    0
+                                                };
+                                                if (tel.contention_mask & bit) != 0 {
+                                                    cfg.pull = 0;
+                                                }
+                                            }
+                                        });
                                     }
-                                });
+                                }
                             }
                             DecodedPacket::BoardCapabilities(id, caps) => {
                                 serial_transport.with_value(|t| t.notify_handshake_ok());
@@ -296,7 +312,7 @@ pub fn App() -> impl IntoView {
                                 {
                                     clear_continuous_timer();
                                     if let Some(w) = web_sys::window() {
-                                        let cb = Closure::once(move || {
+                                        let cb = Closure::once_into_js(move || {
                                             continuous_timer.set_value(None);
                                             trigger_capture();
                                         });
@@ -306,7 +322,6 @@ pub fn App() -> impl IntoView {
                                         ) {
                                             continuous_timer.set_value(Some(id));
                                         }
-                                        cb.forget();
                                     }
                                 }
                             }

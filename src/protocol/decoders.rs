@@ -790,6 +790,8 @@ pub fn export_capture_to_vcd(capture: &CaptureDataFrame, channel_names: &[String
             }
             prev = cur;
         }
+        let end_ts = (capture.samples.len() as u64) * ps_per_sample;
+        let _ = writeln!(out, "#{end_ts}");
     } else {
         for &sym in &VCD_SYMBOLS {
             let _ = writeln!(out, "0{sym}");

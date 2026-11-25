@@ -1113,7 +1113,10 @@ pub fn WaveformCanvas(
     };
 
     let on_pointer_up_or_cancel = move |ev: web_sys::PointerEvent| {
-        if let Some(canvas) = canvas_ref.get() {
+        let is_cancel = ev.type_() == "pointercancel";
+        if is_cancel {
+            box_zoom_range.set(None);
+        } else if let Some(canvas) = canvas_ref.get() {
             let rect = canvas.get_bounding_client_rect();
             let width = rect.width().max(1.0);
             let height = rect.height().max(1.0);
@@ -1126,12 +1129,14 @@ pub fn WaveformCanvas(
                     let min_px = x0.min(x);
                     let max_px = x0.max(x);
                     if max_px - min_px >= 8.0 {
-                        if let Some(cap) = capture.get_untracked() {
-                            let v = view.get_untracked();
-                            let s0 = v.start_sample + (min_px / width) * v.visible_samples;
-                            let s1 = v.start_sample + (max_px / width) * v.visible_samples;
-                            view.set(clamp_view(s0, (s1 - s0).max(4.0), cap.samples.len()));
-                        }
+                        capture.with_untracked(|cap_opt| {
+                            if let Some(cap) = cap_opt {
+                                let v = view.get_untracked();
+                                let s0 = v.start_sample + (min_px / width) * v.visible_samples;
+                                let s1 = v.start_sample + (max_px / width) * v.visible_samples;
+                                view.set(clamp_view(s0, (s1 - s0).max(4.0), cap.samples.len()));
+                            }
+                        });
                     }
                 }
                 box_zoom_range.set(None);
@@ -1139,12 +1144,17 @@ pub fn WaveformCanvas(
                 let ch = y_to_channel(y, height);
                 active_channel.set(ch);
                 let clicked_sample = x_to_sample(x, width);
-                let frames = decoded_frames.get_untracked();
-                if let Some(hit) = frames.into_iter().find(|f| {
-                    (f.channel == ch || f.secondary_channel == Some(ch))
-                        && clicked_sample >= f.start_sample
-                        && clicked_sample <= f.end_sample
-                }) {
+                let hit = decoded_frames.with_untracked(|frames| {
+                    frames
+                        .iter()
+                        .find(|f| {
+                            (f.channel == ch || f.secondary_channel == Some(ch))
+                                && clicked_sample >= f.start_sample
+                                && clicked_sample <= f.end_sample
+                        })
+                        .cloned()
+                });
+                if let Some(hit) = hit {
                     on_select_frame.run(hit);
                 }
             }
@@ -1179,7 +1189,7 @@ pub fn WaveformCanvas(
                 on:pointerleave=move |_| hover_state.set(None)
             />
 
-            <Show when=move || capture.get().is_some()>
+            <Show when=move || capture.with(|c| c.is_some())>
                 <div class="waveform-overlay-controls">
                     <button
                         type="button"
