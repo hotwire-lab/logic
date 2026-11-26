@@ -1,4 +1,7 @@
 /*
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright (c) 2026 Kari Vierimaa, Kempele
+ *
  * HotWire Pocket Lab — 8-Channel Logic Analyzer & Tri-State Force I/O Firmware
  * Supported Target Boards:
  *   - Seeed Studio XIAO ESP32-S3 (Dual-Core Xtensa 240 MHz)
