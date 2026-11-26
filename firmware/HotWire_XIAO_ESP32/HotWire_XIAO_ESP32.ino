@@ -39,12 +39,13 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "hotwire_protocol.h"
 
 // -----------------------------------------------------------------------------
 // Hardware Constants & Channel Mapping
 // -----------------------------------------------------------------------------
 
-#define HOTWIRE_FW_VERSION "1.2.0"
+#define HOTWIRE_FW_VERSION "1.2.1"
 
 static const uint8_t CHANNEL_COUNT = 8;
 #if CONFIG_IDF_TARGET_ESP32C6
@@ -376,7 +377,7 @@ static void sendTelemetryFrame() {
 static void sendCapabilitiesFrame() {
 #if CONFIG_IDF_TARGET_ESP32C6
   static const char CAPS_JSON[] =
-    "{\"board\":\"XIAO-ESP32-C6\",\"firmware\":\"" HOTWIRE_FW_VERSION "\",\"channels\":8,"
+    "{\"board\":\"XIAO-ESP32-C6\",\"firmware\":\"" HOTWIRE_FW_VERSION "\",\"schema\":2,\"tool\":\"logic\",\"channels\":8,"
     "\"maxRateHz\":20000000,\"maxDepth\":32768,"
     "\"pins\":["
     "{\"ch\":0,\"label\":\"D0\",\"gpio\":0},"
@@ -390,7 +391,7 @@ static void sendCapabilitiesFrame() {
     "]}";
 #else
   static const char CAPS_JSON[] =
-    "{\"board\":\"XIAO-ESP32-S3\",\"firmware\":\"" HOTWIRE_FW_VERSION "\",\"channels\":8,"
+    "{\"board\":\"XIAO-ESP32-S3\",\"firmware\":\"" HOTWIRE_FW_VERSION "\",\"schema\":2,\"tool\":\"logic\",\"channels\":8,"
     "\"maxRateHz\":20000000,\"maxDepth\":32768,"
     "\"pins\":["
     "{\"ch\":0,\"label\":\"D0\",\"gpio\":1},"
@@ -1482,7 +1483,11 @@ static void dispatchBinaryCommand(const uint8_t cmd[8]) {
       break;
 
     case CMD_BOOTLOADER:
-      handleEnterBootloader();
+      // Require the shared HotWire bootloader magic (B0 07 10 AD) so a
+      // stray 0xF0 command can never reboot an active capture session.
+      if (hotwire_is_bootloader_magic(p1, p2, p3, p4)) {
+        handleEnterBootloader();
+      }
       break;
 
     default:

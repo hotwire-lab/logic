@@ -187,12 +187,7 @@ pub fn find_nearest_edge(
 }
 
 #[allow(dead_code)]
-pub fn find_next_channel_edge(
-    samples: &[u8],
-    ch: usize,
-    from_idx: f64,
-    dir: i8,
-) -> Option<usize> {
+pub fn find_next_channel_edge(samples: &[u8], ch: usize, from_idx: f64, dir: i8) -> Option<usize> {
     if samples.len() < 2 {
         return None;
     }
@@ -388,7 +383,8 @@ pub fn decode_uart(
 
         let stop_raw = bit_at(samples, opts.rx_ch, stop_mid);
         let framing_error = stop_raw != idle_level;
-        let end_sample = (((i as f64) + 10.0 * bit_samples).round() as usize).min(samples.len() - 1);
+        let end_sample =
+            (((i as f64) + 10.0 * bit_samples).round() as usize).min(samples.len() - 1);
         let (hex, ascii) = format_byte_label(byte_val);
         let base_label = match &ascii {
             Some(a) => format!("{hex} {a}"),
@@ -401,8 +397,15 @@ pub fn decode_uart(
         };
         let detail = format!(
             "UART {hex}{}{}",
-            ascii.as_deref().map(|a| format!(" ({a})")).unwrap_or_default(),
-            if framing_error { " [Framing Error]" } else { "" }
+            ascii
+                .as_deref()
+                .map(|a| format!(" ({a})"))
+                .unwrap_or_default(),
+            if framing_error {
+                " [Framing Error]"
+            } else {
+                ""
+            }
         );
 
         results.push(DecodedFrameAnnotation {
@@ -648,7 +651,10 @@ pub fn decode_i2c(samples: &[u8], opts: I2cConfig) -> Vec<DecodedFrameAnnotation
                         secondary_label: None,
                         detail: format!(
                             "I2C Data {hex}{} {ack_str}",
-                            ascii.as_deref().map(|a| format!(" ({a})")).unwrap_or_default()
+                            ascii
+                                .as_deref()
+                                .map(|a| format!(" ({a})"))
+                                .unwrap_or_default()
                         ),
                         kind: if ack {
                             FrameBadgeKind::Data
@@ -832,7 +838,8 @@ mod tests {
 
             for (k, &bit) in bits.iter().enumerate() {
                 let start = (cursor + (k as f64) * bit_samples).round() as usize;
-                let end = ((cursor + ((k + 1) as f64) * bit_samples).round() as usize).min(buf.len());
+                let end =
+                    ((cursor + ((k + 1) as f64) * bit_samples).round() as usize).min(buf.len());
                 let physical = if invert { bit ^ 1 } else { bit };
                 let level = if physical != 0 { 1u8 << ch } else { 0 };
                 for slot in &mut buf[start..end] {
@@ -889,7 +896,15 @@ mod tests {
         // UART
         let rate = 2_000_000;
         let samples = make_uart_samples("HW\r\n", rate, 115200, 6, false, None);
-        let frames = decode_uart(&samples, rate, UartConfig { rx_ch: 6, baud: 115200, invert: false });
+        let frames = decode_uart(
+            &samples,
+            rate,
+            UartConfig {
+                rx_ch: 6,
+                baud: 115200,
+                invert: false,
+            },
+        );
         let raw: Vec<u8> = frames.iter().filter_map(|f| f.raw_byte).collect();
         assert_eq!(raw, vec![0x48, 0x57, 0x0d, 0x0a]);
         assert_eq!(frames[0].label, "0x48 'H'");
@@ -897,7 +912,15 @@ mod tests {
         assert!(frames.iter().all(|f| !f.framing_error));
 
         let bad = make_uart_samples("OK", rate, 115200, 6, false, Some(1));
-        let bad_frames = decode_uart(&bad, rate, UartConfig { rx_ch: 6, baud: 115200, invert: false });
+        let bad_frames = decode_uart(
+            &bad,
+            rate,
+            UartConfig {
+                rx_ch: 6,
+                baud: 115200,
+                invert: false,
+            },
+        );
         assert!(!bad_frames[0].framing_error);
         assert!(bad_frames[1].framing_error);
         assert_eq!(bad_frames[1].kind, FrameBadgeKind::Error);
@@ -931,7 +954,13 @@ mod tests {
                 bit_order: BitOrder::Msb,
             },
         );
-        assert_eq!(spi_frames.iter().filter_map(|f| f.raw_byte).collect::<Vec<_>>(), vec![0xa5, 0x5a]);
+        assert_eq!(
+            spi_frames
+                .iter()
+                .filter_map(|f| f.raw_byte)
+                .collect::<Vec<_>>(),
+            vec![0xa5, 0x5a]
+        );
         assert_eq!(spi_frames[0].secondary_label.as_deref(), Some("0x12"));
         assert_eq!(spi_frames[1].secondary_label.as_deref(), Some("0x34"));
 
@@ -963,7 +992,13 @@ mod tests {
         push_i2c(&mut i2c, 1, 0, 4);
         push_i2c(&mut i2c, 1, 1, 6);
 
-        let i2c_frames = decode_i2c(&i2c, I2cConfig { scl_ch: 0, sda_ch: 1 });
+        let i2c_frames = decode_i2c(
+            &i2c,
+            I2cConfig {
+                scl_ch: 0,
+                sda_ch: 1,
+            },
+        );
         let labels: Vec<&str> = i2c_frames.iter().map(|f| f.label.as_str()).collect();
         assert_eq!(labels, vec!["S", "0x3C W ACK", "0xAE NACK", "P"]);
         assert_eq!(i2c_frames[1].kind, FrameBadgeKind::Addr);
@@ -984,7 +1019,10 @@ mod tests {
         let names = vec!["SCL".to_string(), "SDA".to_string()];
         let csv = export_capture_to_csv(&capture, &names);
         let lines: Vec<&str> = csv.trim().lines().collect();
-        assert_eq!(lines[0], "sample_index,time_s,D0_SCL,D1_SDA,D2,D3,D4,D5,D6,D7");
+        assert_eq!(
+            lines[0],
+            "sample_index,time_s,D0_SCL,D1_SDA,D2,D3,D4,D5,D6,D7"
+        );
         assert_eq!(lines[1], "0,0.000000000,0,0,0,0,0,0,0,0");
         assert_eq!(lines[2], "1,0.000001000,1,1,0,0,0,0,0,0");
 

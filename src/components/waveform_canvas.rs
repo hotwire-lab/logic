@@ -1,6 +1,4 @@
-use hotwire_core::ui::{
-    apply_anchored_zoom, apply_horizontal_pan, GestureDelta, PinchPanTracker,
-};
+use hotwire_core::ui::{apply_anchored_zoom, apply_horizontal_pan, GestureDelta, PinchPanTracker};
 use leptos::html;
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
@@ -116,7 +114,9 @@ fn compute_minimap(capture: &CaptureDataFrame) -> Option<MinimapActivity> {
             }
         }
         let span = (s1.saturating_sub(s0) + 1) as f64;
-        let avg = ((transitions as f64 * 10.0) / span).round().clamp(0.0, 65535.0) as u16;
+        let avg = ((transitions as f64 * 10.0) / span)
+            .round()
+            .clamp(0.0, 65535.0) as u16;
         *slot = avg;
         if avg > max_density {
             max_density = avg;
@@ -349,9 +349,7 @@ pub fn WaveformCanvas(
         let rect = canvas.get_bounding_client_rect();
         let width = rect.width().floor().max(100.0);
         let height = rect.height().floor().max(180.0);
-        let dpr = web_sys::window()
-            .map(|w| w.device_pixel_ratio())
-            .unwrap_or(1.0);
+        let dpr = hotwire_core::web::capped_device_pixel_ratio();
         let target_w = (width * dpr).round() as u32;
         let target_h = (height * dpr).round() as u32;
         if canvas.width() != target_w || canvas.height() != target_h {
@@ -407,7 +405,9 @@ pub fn WaveformCanvas(
 
         let Some(ref cap) = cur_cap else {
             ctx.set_fill_style_str("#7D8796");
-            ctx.set_font("12.5px 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace");
+            ctx.set_font(
+                "12.5px 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+            );
             ctx.set_text_align("center");
             ctx.set_text_baseline("middle");
             let msg = if is_capturing {
@@ -447,17 +447,26 @@ pub fn WaveformCanvas(
                     .max(2.0);
                     let bx0 = (b as f64 / mm.bins as f64) * width;
                     let bx1 = ((b + 1) as f64 / mm.bins as f64) * width;
-                    ctx.fill_rect(bx0, MINIMAP_HEIGHT - 2.0 - bar_h, (bx1 - bx0).max(1.0), bar_h);
+                    ctx.fill_rect(
+                        bx0,
+                        MINIMAP_HEIGHT - 2.0 - bar_h,
+                        (bx1 - bx0).max(1.0),
+                        bar_h,
+                    );
                 }
             }
         });
 
-        let has_trigger_marker =
-            (cap.triggered || cap.auto_triggered || cap.trigger_index > 0) && cap.trigger_index < total;
+        let has_trigger_marker = (cap.triggered || cap.auto_triggered || cap.trigger_index > 0)
+            && cap.trigger_index < total;
 
         if has_trigger_marker {
             let m_trig_x = (cap.trigger_index as f64 / total_f) * width;
-            ctx.set_fill_style_str(if cap.auto_triggered { "#8B949E" } else { "#F0883E" });
+            ctx.set_fill_style_str(if cap.auto_triggered {
+                "#8B949E"
+            } else {
+                "#F0883E"
+            });
             ctx.fill_rect(m_trig_x.round() - 1.0, 1.0, 2.0, MINIMAP_HEIGHT - 2.0);
         }
 
@@ -469,7 +478,12 @@ pub fn WaveformCanvas(
             ctx.fill_rect(0.0, 0.0, vx_clamped, MINIMAP_HEIGHT - 1.0);
         }
         if vx_clamped + vw < width {
-            ctx.fill_rect(vx_clamped + vw, 0.0, width - (vx_clamped + vw), MINIMAP_HEIGHT - 1.0);
+            ctx.fill_rect(
+                vx_clamped + vw,
+                0.0,
+                width - (vx_clamped + vw),
+                MINIMAP_HEIGHT - 1.0,
+            );
         }
         ctx.set_stroke_style_str("#58A6FF");
         ctx.set_line_width(1.25);
@@ -485,7 +499,9 @@ pub fn WaveformCanvas(
         let first_tick_k = (t_start_sec / step_sec).ceil() as i64;
         let last_tick_k = (t_end_sec / step_sec).floor() as i64;
 
-        ctx.set_font("11px 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace");
+        ctx.set_font(
+            "11px 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+        );
         ctx.set_text_baseline("middle");
         ctx.set_text_align("left");
 
@@ -535,7 +551,10 @@ pub fn WaveformCanvas(
 
                 ctx.begin_path();
                 let mut prev_bit = (samples[i_from] & bit_mask) != 0;
-                ctx.move_to(sample_to_x(i_from as f64), if prev_bit { y_high } else { y_low });
+                ctx.move_to(
+                    sample_to_x(i_from as f64),
+                    if prev_bit { y_high } else { y_low },
+                );
 
                 for (idx, &sample) in samples.iter().enumerate().take(i_to + 1).skip(i_from + 1) {
                     let cur_bit = (sample & bit_mask) != 0;
@@ -576,7 +595,11 @@ pub fn WaveformCanvas(
                     ctx.set_fill_style_str(meta.color);
                     for (idx, &sample) in samples.iter().enumerate().take(i_to + 1).skip(i_from) {
                         let cx = sample_to_x(idx as f64);
-                        let cy = if (sample & bit_mask) != 0 { y_high } else { y_low };
+                        let cy = if (sample & bit_mask) != 0 {
+                            y_high
+                        } else {
+                            y_low
+                        };
                         ctx.begin_path();
                         let _ = ctx.arc(cx, cy, 2.3, 0.0, std::f64::consts::TAU);
                         ctx.fill();
@@ -588,7 +611,8 @@ pub fn WaveformCanvas(
                 let w_int = width as i32;
                 for px in 0..w_int {
                     let pxf = px as f64;
-                    let s0 = ((start_idx + (pxf / width) * vis_count).floor() as usize).min(total - 1);
+                    let s0 =
+                        ((start_idx + (pxf / width) * vis_count).floor() as usize).min(total - 1);
                     let s1 = (((start_idx + ((pxf + 1.0) / width) * vis_count).floor() as usize)
                         .max(s0))
                     .min(total - 1);
@@ -637,38 +661,40 @@ pub fn WaveformCanvas(
             ctx.set_text_align("center");
             ctx.set_text_baseline("middle");
 
-            let draw_bubble =
-                |lane_ch: usize, frame: &DecodedFrameAnnotation, label: &str, kind: FrameBadgeKind| {
-                    if (frame.end_sample as f64) < start_idx || (frame.start_sample as f64) > end_idx {
-                        return;
-                    }
-                    let x0 = sample_to_x(frame.start_sample as f64).max(-2.0);
-                    let x1 = sample_to_x(frame.end_sample as f64).min(width + 2.0);
-                    let bw = (x1 - x0).max(3.0);
-                    let y_top = TOP_HEIGHT + (lane_ch as f64) * lane_height;
-                    let bh = (lane_height * 0.38).clamp(10.0, 15.0);
-                    let by = y_top + lane_height - bh - 2.0;
-                    let (bg, border, text_col) = frame_badge_colors(kind);
-                    let is_sel = sel_id == Some(frame.id);
+            let draw_bubble = |lane_ch: usize,
+                               frame: &DecodedFrameAnnotation,
+                               label: &str,
+                               kind: FrameBadgeKind| {
+                if (frame.end_sample as f64) < start_idx || (frame.start_sample as f64) > end_idx {
+                    return;
+                }
+                let x0 = sample_to_x(frame.start_sample as f64).max(-2.0);
+                let x1 = sample_to_x(frame.end_sample as f64).min(width + 2.0);
+                let bw = (x1 - x0).max(3.0);
+                let y_top = TOP_HEIGHT + (lane_ch as f64) * lane_height;
+                let bh = (lane_height * 0.38).clamp(10.0, 15.0);
+                let by = y_top + lane_height - bh - 2.0;
+                let (bg, border, text_col) = frame_badge_colors(kind);
+                let is_sel = sel_id == Some(frame.id);
 
-                    ctx.set_fill_style_str(bg);
-                    ctx.set_stroke_style_str(if is_sel { "#FFFFFF" } else { border });
-                    ctx.set_line_width(if is_sel { 1.6 } else { 1.0 });
-                    ctx.fill_rect(x0 + 1.0, by, (bw - 2.0).max(2.0), bh);
-                    if bw >= 5.0 {
-                        ctx.stroke_rect(x0 + 1.0, by, (bw - 2.0).max(2.0), bh);
-                    }
+                ctx.set_fill_style_str(bg);
+                ctx.set_stroke_style_str(if is_sel { "#FFFFFF" } else { border });
+                ctx.set_line_width(if is_sel { 1.6 } else { 1.0 });
+                ctx.fill_rect(x0 + 1.0, by, (bw - 2.0).max(2.0), bh);
+                if bw >= 5.0 {
+                    ctx.stroke_rect(x0 + 1.0, by, (bw - 2.0).max(2.0), bh);
+                }
 
-                    if bw >= 22.0 {
-                        ctx.save();
-                        ctx.begin_path();
-                        ctx.rect(x0 + 3.0, by, (bw - 6.0).max(1.0), bh);
-                        ctx.clip();
-                        ctx.set_fill_style_str(text_col);
-                        let _ = ctx.fill_text(label, x0 + bw / 2.0, by + bh / 2.0 + 0.5);
-                        ctx.restore();
-                    }
-                };
+                if bw >= 22.0 {
+                    ctx.save();
+                    ctx.begin_path();
+                    ctx.rect(x0 + 3.0, by, (bw - 6.0).max(1.0), bh);
+                    ctx.clip();
+                    ctx.set_fill_style_str(text_col);
+                    let _ = ctx.fill_text(label, x0 + bw / 2.0, by + bh / 2.0 + 0.5);
+                    ctx.restore();
+                }
+            };
 
             for frame in &frames {
                 draw_bubble(frame.channel, frame, &frame.label, frame.kind);
@@ -686,7 +712,11 @@ pub fn WaveformCanvas(
             let trig_x = sample_to_x(cap.trigger_index as f64);
             if trig_x >= 0.0 && trig_x <= width {
                 ctx.save();
-                let trig_col = if cap.auto_triggered { "#8B949E" } else { "#F0883E" };
+                let trig_col = if cap.auto_triggered {
+                    "#8B949E"
+                } else {
+                    "#F0883E"
+                };
                 ctx.set_stroke_style_str(trig_col);
                 ctx.set_line_width(1.5);
                 let dash = js_sys::Array::new();
@@ -720,7 +750,12 @@ pub fn WaveformCanvas(
                 ctx.fill_rect(bx, TOP_HEIGHT, bw, height - TOP_HEIGHT);
                 ctx.set_stroke_style_str("#58A6FF");
                 ctx.set_line_width(1.25);
-                ctx.stroke_rect(bx + 0.5, TOP_HEIGHT + 0.5, bw - 1.0, height - TOP_HEIGHT - 1.0);
+                ctx.stroke_rect(
+                    bx + 0.5,
+                    TOP_HEIGHT + 0.5,
+                    bw - 1.0,
+                    height - TOP_HEIGHT - 1.0,
+                );
                 let span_sec = ((bw / width.max(1.0)) * vis_count) / rate_hz;
                 ctx.set_fill_style_str("#58A6FF");
                 ctx.set_font("600 11px ui-monospace, monospace");
@@ -864,7 +899,10 @@ pub fn WaveformCanvas(
     });
 
     let x_to_sample = move |x_px: f64, width: f64| -> usize {
-        let total = capture.get_untracked().map(|c| c.samples.len()).unwrap_or(1);
+        let total = capture
+            .get_untracked()
+            .map(|c| c.samples.len())
+            .unwrap_or(1);
         let v = view.get_untracked();
         let raw = v.start_sample + (x_px / width.max(1.0)) * v.visible_samples;
         (raw.round() as isize).clamp(0, (total.saturating_sub(1)) as isize) as usize
@@ -883,34 +921,39 @@ pub fn WaveformCanvas(
             }
             let frac = (x_px / width.max(1.0)).clamp(0.0, 1.0);
             let center = frac * (total as f64);
-            view.update(|v| *v = clamp_view(center - v.visible_samples / 2.0, v.visible_samples, total));
+            view.update(|v| {
+                *v = clamp_view(center - v.visible_samples / 2.0, v.visible_samples, total)
+            });
         }
     };
 
-    let snap_cursor_sample = move |x_px: f64, y_px: f64, width: f64, height: f64, alt_key: bool| -> usize {
-        let raw = x_to_sample(x_px, width);
-        let Some(cap) = capture.get_untracked() else {
-            snap_marker.set(None);
-            return raw;
+    let snap_cursor_sample =
+        move |x_px: f64, y_px: f64, width: f64, height: f64, alt_key: bool| -> usize {
+            let raw = x_to_sample(x_px, width);
+            let Some(cap) = capture.get_untracked() else {
+                snap_marker.set(None);
+                return raw;
+            };
+            if alt_key || y_px < TOP_HEIGHT {
+                snap_marker.set(None);
+                return raw;
+            }
+            let ch = y_to_channel(y_px, height);
+            let v = view.get_untracked();
+            let snap_radius = ((10.0 / width.max(1.0)) * v.visible_samples)
+                .round()
+                .max(1.0) as usize;
+            if let Some(snapped) = find_nearest_edge(&cap.samples, ch, raw as f64, snap_radius) {
+                snap_marker.set(Some(SnapMarker {
+                    sample_idx: snapped,
+                    ch,
+                }));
+                snapped
+            } else {
+                snap_marker.set(None);
+                raw
+            }
         };
-        if alt_key || y_px < TOP_HEIGHT {
-            snap_marker.set(None);
-            return raw;
-        }
-        let ch = y_to_channel(y_px, height);
-        let v = view.get_untracked();
-        let snap_radius = ((10.0 / width.max(1.0)) * v.visible_samples).round().max(1.0) as usize;
-        if let Some(snapped) = find_nearest_edge(&cap.samples, ch, raw as f64, snap_radius) {
-            snap_marker.set(Some(SnapMarker {
-                sample_idx: snapped,
-                ch,
-            }));
-            snapped
-        } else {
-            snap_marker.set(None);
-            raw
-        }
-    };
 
     let on_wheel = move |ev: web_sys::WheelEvent| {
         let Some(cap) = capture.get_untracked() else {
@@ -958,7 +1001,11 @@ pub fn WaveformCanvas(
     };
 
     let on_pointer_down = move |ev: web_sys::PointerEvent| {
-        if capture.get_untracked().map(|c| c.samples.is_empty()).unwrap_or(true) {
+        if capture
+            .get_untracked()
+            .map(|c| c.samples.is_empty())
+            .unwrap_or(true)
+        {
             return;
         }
         let Some(canvas) = canvas_ref.get() else {
@@ -996,8 +1043,12 @@ pub fn WaveformCanvas(
 
         if show_cursors.get_untracked() {
             let v = view.get_untracked();
-            let ax = ((cursor_a.get_untracked() as f64 - v.start_sample) / v.visible_samples.max(1.0)) * width;
-            let bx = ((cursor_b.get_untracked() as f64 - v.start_sample) / v.visible_samples.max(1.0)) * width;
+            let ax = ((cursor_a.get_untracked() as f64 - v.start_sample)
+                / v.visible_samples.max(1.0))
+                * width;
+            let bx = ((cursor_b.get_untracked() as f64 - v.start_sample)
+                / v.visible_samples.max(1.0))
+                * width;
             let dist_a = (x - ax).abs();
             let dist_b = (x - bx).abs();
             let thresh = if y <= TOP_HEIGHT + 8.0 { 16.0 } else { 9.0 };
@@ -1042,7 +1093,8 @@ pub fn WaveformCanvas(
             if y >= TOP_HEIGHT {
                 let ch = y_to_channel(y, height);
                 let sample_idx = x_to_sample(x, width);
-                let measurement = measure_pulse_at_sample(&cap.samples, ch, sample_idx, cap.sample_rate_hz);
+                let measurement =
+                    measure_pulse_at_sample(&cap.samples, ch, sample_idx, cap.sample_rate_hz);
                 hover_state.set(Some(HoverState {
                     x,
                     y,

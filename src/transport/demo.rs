@@ -79,10 +79,15 @@ impl DemoSimulator {
     pub fn build_caps_frame(&self) -> Vec<u8> {
         let pins: Vec<String> = CHANNELS
             .iter()
-            .map(|c| format!(r#"{{"ch":{},"label":"{}","gpio":{}}}"#, c.ch, c.label, c.gpio))
+            .map(|c| {
+                format!(
+                    r#"{{"ch":{},"label":"{}","gpio":{}}}"#,
+                    c.ch, c.label, c.gpio
+                )
+            })
             .collect();
         let json = format!(
-            r#"{{"board":"XIAO-ESP32-S3","firmware":"1.2.0-demo","channels":8,"maxRateHz":20000000,"maxDepth":32768,"pins":[{}]}}"#,
+            r#"{{"board":"XIAO-ESP32-S3","firmware":"1.2.1-demo","channels":8,"maxRateHz":20000000,"maxDepth":32768,"pins":[{}]}}"#,
             pins.join(",")
         );
         encode_response_frame(TYPE_BOARD_CAPABILITIES, json.as_bytes())
@@ -437,7 +442,8 @@ impl DemoSimulator {
         let bit_samples = (rate_hz as f64 / 115200.0).max(2.0);
         let message = b"HotWire!\r\n";
         let byte_span = 10.5 * bit_samples;
-        let uart_burst_span = (message.len() as f64 * byte_span + 40.0 * bit_samples).round() as isize;
+        let uart_burst_span =
+            (message.len() as f64 * byte_span + 40.0 * bit_samples).round() as isize;
         let mut uart_start = if st.trig_ch == 6 {
             trig_index as isize
         } else {
@@ -460,7 +466,9 @@ impl DemoSimulator {
                     } else {
                         (byte_val >> (bit_idx - 1)) & 1
                     };
-                    let s0 = ((char_start + (bit_idx as f64) * bit_samples).round().max(0.0) as usize)
+                    let s0 = ((char_start + (bit_idx as f64) * bit_samples)
+                        .round()
+                        .max(0.0) as usize)
                         .min(sample_count);
                     let s1 = ((char_start + ((bit_idx + 1) as f64) * bit_samples)
                         .round()
@@ -492,7 +500,9 @@ impl DemoSimulator {
 mod tests {
     use super::*;
     use crate::protocol::codec::build_la_capture_cmd;
-    use crate::protocol::decoders::{decode_i2c, decode_spi, decode_uart, BitOrder, I2cConfig, SpiConfig, UartConfig};
+    use crate::protocol::decoders::{
+        decode_i2c, decode_spi, decode_uart, BitOrder, I2cConfig, SpiConfig, UartConfig,
+    };
     use crate::protocol::demuxer::ProtocolDemuxer;
 
     #[test]
@@ -528,7 +538,13 @@ mod tests {
         assert!(spi.len() >= 4);
         assert_eq!(spi[0].raw_byte, Some(0xa5));
 
-        let i2c = decode_i2c(&cap.samples, I2cConfig { scl_ch: 4, sda_ch: 5 });
+        let i2c = decode_i2c(
+            &cap.samples,
+            I2cConfig {
+                scl_ch: 4,
+                sda_ch: 5,
+            },
+        );
         assert!(i2c.iter().any(|f| f.label == "0x3C W ACK"));
 
         let uart = decode_uart(

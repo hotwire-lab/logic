@@ -1,6 +1,6 @@
-use hotwire_core::protocol::{BoardIdentity, FirmwareMismatch, ToolId};
-use hotwire_core::transport::HandshakeGuard;
+use hotwire_core::protocol::{FrameRule, ToolId};
 use hotwire_core::ui::{FirmwareMismatchModal, HotWireTheme};
+use hotwire_core::{use_hotwire_session, SessionConfig};
 use leptos::prelude::*;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
@@ -11,26 +11,26 @@ use crate::components::top_toolbar::{CaptureConfig, TopToolbar};
 use crate::components::waveform_canvas::{WaveformCanvas, WaveformCommand};
 use crate::protocol::codec::{
     build_la_abort_cmd, build_la_capture_cmd, build_pin_force_cmd, build_release_all_cmd,
+    decode_response_payload,
 };
 use crate::protocol::decoders::{
     decode_protocol, export_capture_to_csv, export_capture_to_vcd, DecodedFrameAnnotation,
     DecoderConfig, DecoderKind,
 };
-use crate::protocol::demuxer::ProtocolDemuxer;
+use hotwire_core::web::download_text_file;
+
 use crate::protocol::time_format::format_signed_duration;
 use crate::protocol::types::{
-    BoardCapabilities, CaptureDataFrame, DecodedPacket, StatusTelemetry, RATE_PRESETS,
+    BoardCapabilities, CaptureDataFrame, DecodedPacket, StatusTelemetry, MAX_FRAME_PAYLOAD_LEN,
+    RATE_PRESETS, TYPE_LA_CAPTURE_DATA, TYPE_STATUS_TELEMETRY,
 };
-use crate::transport::serial::{create_logic_transport, TransportSnapshot};
+use crate::transport::serial::create_logic_transport;
 
 const CHANNEL_LABELS_STORAGE_KEY: &str = "hotwire.channelLabels.v1";
 
 fn load_channel_labels() -> [String; 8] {
     let empty: [String; 8] = Default::default();
-    let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) else {
-        return empty;
-    };
-    let Ok(Some(raw)) = storage.get_item(CHANNEL_LABELS_STORAGE_KEY) else {
+    let Some(raw) = hotwire_core::web::local_storage_get(CHANNEL_LABELS_STORAGE_KEY) else {
         return empty;
     };
     if let Ok(parsed) = serde_json::from_str::<Vec<String>>(&raw) {
@@ -46,57 +46,16 @@ fn load_channel_labels() -> [String; 8] {
 }
 
 fn save_channel_labels(labels: &[String; 8]) {
-    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
-        if let Ok(json) = serde_json::to_string(labels) {
-            let _ = storage.set_item(CHANNEL_LABELS_STORAGE_KEY, &json);
-        }
+    if let Ok(json) = serde_json::to_string(labels) {
+        hotwire_core::web::local_storage_set(CHANNEL_LABELS_STORAGE_KEY, &json);
     }
-}
-
-fn download_text_file(filename: &str, content: &str, mime_type: &str) {
-    let Some(win) = web_sys::window() else { return };
-    let Some(doc) = win.document() else { return };
-    let arr = js_sys::Array::new();
-    arr.push(&content.into());
-    let bag = web_sys::BlobPropertyBag::new();
-    bag.set_type(mime_type);
-    let Ok(blob) = web_sys::Blob::new_with_str_sequence_and_options(&arr, &bag) else {
-        return;
-    };
-    let Ok(url) = web_sys::Url::create_object_url_with_blob(&blob) else {
-        return;
-    };
-    if let Ok(el) = doc.create_element("a") {
-        if let Ok(link) = el.dyn_into::<web_sys::HtmlAnchorElement>() {
-            link.set_href(&url);
-            link.set_download(filename);
-            if let Some(body) = doc.body() {
-                let _ = body.append_child(&link);
-                link.click();
-                link.remove();
-            }
-        }
-    }
-    let url_clone = url.clone();
-    let cb = Closure::once_into_js(move || {
-        let _ = web_sys::Url::revoke_object_url(&url_clone);
-    });
-    let _ = win.set_timeout_with_callback_and_timeout_and_arguments_0(
-        cb.as_ref().unchecked_ref(),
-        1000,
-    );
 }
 
 #[component]
 pub fn App() -> impl IntoView {
     let serial_transport = StoredValue::new_local(create_logic_transport());
 
-    let transport = RwSignal::new(serial_transport.with_value(|t| t.snapshot()));
-    let identity = RwSignal::new(None::<BoardIdentity>);
     let board_caps = RwSignal::new(None::<BoardCapabilities>);
-    let mismatch = RwSignal::new(None::<FirmwareMismatch>);
-    let flasher_mismatch = RwSignal::new(None::<FirmwareMismatch>);
-    let handshake_guard = StoredValue::new_local(HandshakeGuard::new(ToolId::LogicAnalyzer));
     let drawer_open = RwSignal::new(false);
     let telemetry = RwSignal::new(StatusTelemetry::default());
     let channel_configs = RwSignal::new([ChannelUiState::default(); 8]);
@@ -116,7 +75,6 @@ pub fn App() -> impl IntoView {
         waveform_cmd.set(Some((next, cmd)));
     };
 
-    let demuxer = StoredValue::new_local(ProtocolDemuxer::new());
     let continuous_timer = StoredValue::new(None::<i32>);
     let capture_watchdog = StoredValue::new(None::<i32>);
     let abort_watchdog = StoredValue::new(None::<i32>);
@@ -144,7 +102,7 @@ pub fn App() -> impl IntoView {
     };
 
     let trigger_capture = move || {
-        if !transport.get_untracked().status.is_active() {
+        if !serial_transport.with_value(|t| t.snapshot().status.is_active()) {
             return;
         }
         let cfg = capture_config.get_untracked();
@@ -158,7 +116,8 @@ pub fn App() -> impl IntoView {
                 .get(cfg.rate_id as usize)
                 .map(|r| r.hz)
                 .unwrap_or(1_000_000) as f64;
-            let timeout_ms = (((cfg.blocks_kb as f64 * 1024.0) / rate_hz) * 1000.0).ceil() as i32 + 6500;
+            let timeout_ms =
+                (((cfg.blocks_kb as f64 * 1024.0) / rate_hz) * 1000.0).ceil() as i32 + 6500;
             let cb = Closure::once_into_js(move || {
                 capture_watchdog.set_value(None);
                 capturing.set(false);
@@ -206,180 +165,159 @@ pub fn App() -> impl IntoView {
         }
     };
 
-    // Initialize SerialTransport + ProtocolDemuxer
-    serial_transport.with_value(|st| {
-        st.init(
-            move |snap: TransportSnapshot| {
-                let disconnected = !snap.status.is_active();
-                let is_usb = snap.status.is_usb_connected();
-                let dev_name = snap.device_name.clone();
-                transport.set(snap);
-                if disconnected {
-                    handshake_guard.update_value(|g| g.cancel());
-                    demuxer.update_value(|d| d.reset());
-                    identity.set(None);
-                    board_caps.set(None);
-                    capturing.set(false);
-                    continuous.set(false);
-                    clear_watchdogs();
-                    clear_continuous_timer();
-                } else if is_usb {
-                    mismatch.set(None);
-                    flasher_mismatch.set(None);
-                    handshake_guard.update_value(|g| {
-                        g.arm_timeout(dev_name, 5000, move |mm| {
-                            mismatch.set(Some(mm.clone()));
-                            flasher_mismatch.set(Some(mm));
-                            serial_transport.with_value(|t| t.disconnect());
-                        });
-                    });
-                } else {
-                    handshake_guard.update_value(|g| g.cancel());
-                    mismatch.set(None);
-                    flasher_mismatch.set(None);
-                }
-            },
-            move |bytes: &[u8]| {
-                demuxer.update_value(|d| {
-                    d.push(
-                        bytes,
-                        |packet| match packet {
-                            DecodedPacket::StatusTelemetry(tel) => {
-                                if telemetry.get_untracked() != tel {
-                                    telemetry.set(tel);
-                                    let needs_cfg_update = channel_configs.with_untracked(|cfgs| {
-                                        cfgs.iter().enumerate().any(|(ch, cfg)| {
-                                            let bit = 1u8 << ch;
-                                            let is_forced = (tel.force_enable_mask & bit) != 0;
-                                            let is_high = (tel.forced_levels & bit) != 0;
-                                            let next_mode = if is_forced {
-                                                if is_high { 2 } else { 1 }
-                                            } else {
-                                                0
-                                            };
-                                            let contended = (tel.contention_mask & bit) != 0;
-                                            cfg.mode != next_mode || (contended && cfg.pull != 0)
-                                        })
-                                    });
-                                    if needs_cfg_update {
-                                        channel_configs.update(|cfgs| {
-                                            for (ch, cfg) in cfgs.iter_mut().enumerate() {
-                                                let bit = 1u8 << ch;
-                                                let is_forced = (tel.force_enable_mask & bit) != 0;
-                                                let is_high = (tel.forced_levels & bit) != 0;
-                                                cfg.mode = if is_forced {
-                                                    if is_high { 2 } else { 1 }
-                                                } else {
-                                                    0
-                                                };
-                                                if (tel.contention_mask & bit) != 0 {
-                                                    cfg.pull = 0;
-                                                }
-                                            }
-                                        });
-                                    }
-                                }
-                            }
-                            DecodedPacket::BoardCapabilities(id, caps) => {
-                                serial_transport.with_value(|t| t.notify_handshake_ok());
-                                if transport.get_untracked().status.is_usb_connected() {
-                                    let mut verdict = Ok(());
-                                    handshake_guard.update_value(|g| {
-                                        verdict = g.verify(&id);
-                                    });
-                                    if let Err(mm) = verdict {
-                                        mismatch.set(Some(mm.clone()));
-                                        flasher_mismatch.set(Some(mm));
-                                        serial_transport.with_value(|t| t.disconnect());
-                                        return;
+    let session = use_hotwire_session(
+        serial_transport.with_value(|t| t.clone()),
+        SessionConfig::new(
+            ToolId::LogicAnalyzer,
+            vec![
+                FrameRule::new(TYPE_STATUS_TELEMETRY, 4, 4),
+                FrameRule::new(TYPE_LA_CAPTURE_DATA, 8, MAX_FRAME_PAYLOAD_LEN),
+            ],
+        ),
+        move |id, _is_usb| {
+            drawer_open.set(false);
+            board_caps.set(Some(BoardCapabilities::from_identity(id)));
+        },
+        move || {
+            capturing.set(false);
+            continuous.set(false);
+            clear_watchdogs();
+            clear_continuous_timer();
+            board_caps.set(None);
+            telemetry.set(StatusTelemetry::default());
+        },
+        move |frame_type, payload| {
+            let Some(packet) = decode_response_payload(frame_type, payload) else {
+                return;
+            };
+            match packet {
+                DecodedPacket::StatusTelemetry(tel) => {
+                    if telemetry.get_untracked() != tel {
+                        telemetry.set(tel);
+                        let needs_cfg_update = channel_configs.with_untracked(|cfgs| {
+                            cfgs.iter().enumerate().any(|(ch, cfg)| {
+                                let bit = 1u8 << ch;
+                                let is_forced = (tel.force_enable_mask & bit) != 0;
+                                let is_high = (tel.forced_levels & bit) != 0;
+                                let next_mode = if is_forced {
+                                    if is_high {
+                                        2
+                                    } else {
+                                        1
                                     }
                                 } else {
-                                    handshake_guard.update_value(|g| g.cancel());
-                                }
-                                mismatch.set(None);
-                                flasher_mismatch.set(None);
-                                drawer_open.set(false);
-                                identity.set(Some(id));
-                                board_caps.set(Some(caps));
-                            }
-                            DecodedPacket::LaCaptureData(cap) => {
-                                clear_watchdogs();
-                                capture.set(Some(cap));
-                                selected_frame_id.set(None);
-                                capturing.set(false);
-                                if continuous.get_untracked()
-                                    && transport.get_untracked().status.is_active()
-                                {
-                                    clear_continuous_timer();
-                                    if let Some(w) = web_sys::window() {
-                                        let cb = Closure::once_into_js(move || {
-                                            continuous_timer.set_value(None);
-                                            trigger_capture();
-                                        });
-                                        if let Ok(id) = w.set_timeout_with_callback_and_timeout_and_arguments_0(
-                                            cb.as_ref().unchecked_ref(),
-                                            80,
-                                        ) {
-                                            continuous_timer.set_value(Some(id));
+                                    0
+                                };
+                                let contended = (tel.contention_mask & bit) != 0;
+                                cfg.mode != next_mode || (contended && cfg.pull != 0)
+                            })
+                        });
+                        if needs_cfg_update {
+                            channel_configs.update(|cfgs| {
+                                for (ch, cfg) in cfgs.iter_mut().enumerate() {
+                                    let bit = 1u8 << ch;
+                                    let is_forced = (tel.force_enable_mask & bit) != 0;
+                                    let is_high = (tel.forced_levels & bit) != 0;
+                                    cfg.mode = if is_forced {
+                                        if is_high {
+                                            2
+                                        } else {
+                                            1
                                         }
+                                    } else {
+                                        0
+                                    };
+                                    if (tel.contention_mask & bit) != 0 {
+                                        cfg.pull = 0;
                                     }
                                 }
+                            });
+                        }
+                    }
+                }
+                DecodedPacket::BoardCapabilities(_, _) => {
+                    // Capabilities are intercepted by the shared session.
+                }
+                DecodedPacket::LaCaptureData(cap) => {
+                    clear_watchdogs();
+                    capture.set(Some(cap));
+                    selected_frame_id.set(None);
+                    capturing.set(false);
+                    if continuous.get_untracked()
+                        && serial_transport.with_value(|t| t.snapshot().status.is_active())
+                    {
+                        clear_continuous_timer();
+                        if let Some(w) = web_sys::window() {
+                            let cb = Closure::once_into_js(move || {
+                                continuous_timer.set_value(None);
+                                trigger_capture();
+                            });
+                            if let Ok(id) = w.set_timeout_with_callback_and_timeout_and_arguments_0(
+                                cb.as_ref().unchecked_ref(),
+                                80,
+                            ) {
+                                continuous_timer.set_value(Some(id));
                             }
-                        },
-                        |_| {},
-                    );
-                });
-            },
-        );
-    });
+                        }
+                    }
+                }
+            }
+        },
+        |_| {},
+    );
+    let transport = session.transport;
+    let identity = session.identity;
+    let mismatch = session.mismatch;
+    let flasher_mismatch = session.flasher_mismatch;
 
     // Global keyboard shortcuts
     Effect::new(move |_| {
-        let cb = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
-            if let Some(target) = ev
-                .target()
-                .and_then(|t| t.dyn_into::<web_sys::HtmlElement>().ok())
-            {
-                let tag = target.tag_name();
-                if matches!(tag.as_str(), "INPUT" | "SELECT" | "TEXTAREA")
-                    || target.is_content_editable()
+        let cb =
+            Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
+                if let Some(target) = ev
+                    .target()
+                    .and_then(|t| t.dyn_into::<web_sys::HtmlElement>().ok())
                 {
-                    return;
+                    let tag = target.tag_name();
+                    if matches!(tag.as_str(), "INPUT" | "SELECT" | "TEXTAREA")
+                        || target.is_content_editable()
+                    {
+                        return;
+                    }
                 }
-            }
 
-            let code = ev.code();
-            let key = ev.key();
-            if code == "Space" {
-                if !transport.get_untracked().status.is_active() {
-                    return;
+                let code = ev.code();
+                let key = ev.key();
+                if code == "Space" {
+                    if !transport.get_untracked().status.is_active() {
+                        return;
+                    }
+                    ev.prevent_default();
+                    if capturing.get_untracked() || continuous.get_untracked() {
+                        abort_capture();
+                    } else {
+                        trigger_capture();
+                    }
+                } else if key == "+" || key == "=" {
+                    ev.prevent_default();
+                    send_waveform_cmd(WaveformCommand::ZoomIn);
+                } else if key == "-" || key == "_" {
+                    ev.prevent_default();
+                    send_waveform_cmd(WaveformCommand::ZoomOut);
+                } else if key == "ArrowLeft" {
+                    ev.prevent_default();
+                    send_waveform_cmd(WaveformCommand::PanByFraction(-0.2));
+                } else if key == "ArrowRight" {
+                    ev.prevent_default();
+                    send_waveform_cmd(WaveformCommand::PanByFraction(0.2));
+                } else if key == "f" || key == "F" {
+                    send_waveform_cmd(WaveformCommand::FitAll);
+                } else if key == "t" || key == "T" {
+                    send_waveform_cmd(WaveformCommand::JumpToTrigger);
+                } else if key == "c" || key == "C" {
+                    send_waveform_cmd(WaveformCommand::ToggleCursors);
                 }
-                ev.prevent_default();
-                if capturing.get_untracked() || continuous.get_untracked() {
-                    abort_capture();
-                } else {
-                    trigger_capture();
-                }
-            } else if key == "+" || key == "=" {
-                ev.prevent_default();
-                send_waveform_cmd(WaveformCommand::ZoomIn);
-            } else if key == "-" || key == "_" {
-                ev.prevent_default();
-                send_waveform_cmd(WaveformCommand::ZoomOut);
-            } else if key == "ArrowLeft" {
-                ev.prevent_default();
-                send_waveform_cmd(WaveformCommand::PanByFraction(-0.2));
-            } else if key == "ArrowRight" {
-                ev.prevent_default();
-                send_waveform_cmd(WaveformCommand::PanByFraction(0.2));
-            } else if key == "f" || key == "F" {
-                send_waveform_cmd(WaveformCommand::FitAll);
-            } else if key == "t" || key == "T" {
-                send_waveform_cmd(WaveformCommand::JumpToTrigger);
-            } else if key == "c" || key == "C" {
-                send_waveform_cmd(WaveformCommand::ToggleCursors);
-            }
-        });
+            });
 
         if let Some(win) = web_sys::window() {
             let _ = win.add_event_listener_with_callback("keydown", cb.as_ref().unchecked_ref());
@@ -487,7 +425,7 @@ pub fn App() -> impl IntoView {
 
     view! {
         <HotWireTheme />
-        <div class="app-shell">
+        <div class="app-shell hw-app">
             <TopToolbar
                 transport=transport
                 identity=identity

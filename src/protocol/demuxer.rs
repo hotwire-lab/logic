@@ -26,10 +26,6 @@ impl ProtocolDemuxer {
         }
     }
 
-    pub fn reset(&mut self) {
-        self.inner.reset();
-    }
-
     pub fn push<FP, FT>(&mut self, chunk: &[u8], mut on_packet: FP, on_text: FT)
     where
         FP: FnMut(DecodedPacket),
@@ -74,7 +70,11 @@ mod tests {
         stream.extend_from_slice(log2);
 
         for chunk in stream.chunks(3) {
-            demux.push(chunk, |p| packets.push(p), |b| text_bytes.extend_from_slice(b));
+            demux.push(
+                chunk,
+                |p| packets.push(p),
+                |b| text_bytes.extend_from_slice(b),
+            );
         }
 
         assert_eq!(packets.len(), 2);
@@ -144,7 +144,11 @@ mod tests {
         combined.push(0xaa);
         combined.extend_from_slice(&good_tel);
 
-        demux.push(&combined, |p| packets.push(p), |b| text_bytes.extend_from_slice(b));
+        demux.push(
+            &combined,
+            |p| packets.push(p),
+            |b| text_bytes.extend_from_slice(b),
+        );
 
         assert_eq!(packets.len(), 1);
         assert_eq!(

@@ -6,16 +6,7 @@ use leptos::prelude::*;
 use crate::transport::serial::SerialTransport;
 
 fn logic_firmware_profiles() -> Vec<FirmwareProfile> {
-    vec![
-        FirmwareProfile::xiao_esp32s3(
-            "HotWire_XIAO_ESP32S3.ino",
-            "8-Ch Logic Analyzer (D0–D7 / GPIO1–6, 43–44), up to 20 MHz / 32k samples, 25 Hz Force I/O + 20 ms SHORT! protection",
-        ),
-        FirmwareProfile::xiao_esp32c6(
-            "HotWire_XIAO_ESP32C6.ino",
-            "8-Ch Logic Analyzer (D0–D7), Dedicated GPIO capture + Tri-State Force I/O over USB CDC",
-        ),
-    ]
+    FirmwareProfile::standard_profiles(ToolId::LogicAnalyzer)
 }
 
 #[component]

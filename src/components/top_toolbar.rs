@@ -4,9 +4,7 @@ use leptos::prelude::*;
 
 use crate::protocol::decoders::{DecoderConfig, DecoderKind};
 use crate::protocol::time_format::{format_duration, format_resolution};
-use crate::protocol::types::{
-    PreTriggerRatio, TriggerEdge, CHANNELS, DEPTH_PRESETS, RATE_PRESETS,
-};
+use crate::protocol::types::{PreTriggerRatio, TriggerEdge, CHANNELS, DEPTH_PRESETS, RATE_PRESETS};
 use crate::transport::serial::TransportSnapshot;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,6 +97,7 @@ pub fn TopToolbar(
             on_start_demo=on_start_demo
             flasher_open=drawer_open
             on_toggle_flasher=on_toggle_drawer
+            app_version=env!("CARGO_PKG_VERSION")
         >
             <button
                 type="button"

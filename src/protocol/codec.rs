@@ -1,9 +1,9 @@
-pub use hotwire_core::protocol::{
-    build_bootloader_cmd_zero as build_bootloader_cmd, build_get_caps_cmd, build_ping_status_cmd,
-    encode_command_8 as build_command_frame, encode_frame as encode_response_frame,
-};
 #[cfg(test)]
 use hotwire_core::protocol::compute_xor_checksum;
+pub use hotwire_core::protocol::{
+    build_bootloader_cmd, build_get_caps_cmd, build_ping_status_cmd,
+    encode_command_8 as build_command_frame, encode_frame as encode_response_frame,
+};
 use serde::Deserialize;
 
 use crate::protocol::types::*;
@@ -224,7 +224,11 @@ mod tests {
 
         let mut timeout_payload = vec![0u8; 8];
         timeout_payload[6..8].copy_from_slice(&LA_FLAG_AUTO_TIMEOUT.to_le_bytes());
-        assert!(decode_capture_data(&timeout_payload).unwrap().auto_triggered);
+        assert!(
+            decode_capture_data(&timeout_payload)
+                .unwrap()
+                .auto_triggered
+        );
 
         let json = br#"{"board":"XIAO-ESP32-S3","channels":8,"maxRateHz":20000000,"maxDepth":32768,"pins":[{"ch":0,"label":"D0","gpio":1}]}"#;
         let (_, caps) = decode_board_capabilities(json).expect("valid caps");

@@ -1,6 +1,6 @@
 {
-  "name": "HotWire Pocket Lab (8-Channel Logic Analyzer)",
-  "short_name": "HotWire Lab",
+  "name": "HotWire Logic Analyzer - 8-Channel Logic & Force I/O",
+  "short_name": "HotWire Logic",
   "description": "8-Channel Logic Analyzer and Tri-State Force I/O PWA for Seeed Studio XIAO ESP32-S3 and XIAO ESP32-C6 via Web Serial and WebUSB.",
   "start_url": "./",
   "scope": "./",
@@ -8,13 +8,31 @@
   "orientation": "any",
   "background_color": "#0b0e12",
   "theme_color": "#0b0e12",
-  "categories": ["developer", "utilities"],
+  "categories": [
+    "developer",
+    "utilities"
+  ],
   "icons": [
     {
       "src": "./icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
       "purpose": "any maskable"
     }
-  ]
+  ],
+  "id": "./",
+  "lang": "en",
+  "dir": "ltr"
 }

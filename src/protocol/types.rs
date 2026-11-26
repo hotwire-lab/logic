@@ -1,6 +1,6 @@
 pub use hotwire_core::protocol::{
-    BoardIdentity, CMD_BOOTLOADER, CMD_GET_CAPS, CMD_PING_STATUS, PROTOCOL_SYNC_0,
-    PROTOCOL_SYNC_1, TYPE_BOARD_CAPABILITIES,
+    BoardIdentity, CMD_BOOTLOADER, CMD_GET_CAPS, CMD_PING_STATUS, PROTOCOL_SYNC_0, PROTOCOL_SYNC_1,
+    TYPE_BOARD_CAPABILITIES,
 };
 use serde::Deserialize;
 
@@ -39,14 +39,54 @@ pub struct ChannelDescriptor {
 }
 
 pub const CHANNELS: [ChannelDescriptor; 8] = [
-    ChannelDescriptor { ch: 0, label: "D0", gpio: 1, color: "#58A6FF" },
-    ChannelDescriptor { ch: 1, label: "D1", gpio: 2, color: "#3FB950" },
-    ChannelDescriptor { ch: 2, label: "D2", gpio: 3, color: "#D29922" },
-    ChannelDescriptor { ch: 3, label: "D3", gpio: 4, color: "#F778BA" },
-    ChannelDescriptor { ch: 4, label: "D4", gpio: 5, color: "#A371F7" },
-    ChannelDescriptor { ch: 5, label: "D5", gpio: 6, color: "#39C5CF" },
-    ChannelDescriptor { ch: 6, label: "D6", gpio: 43, color: "#FFA657" },
-    ChannelDescriptor { ch: 7, label: "D7", gpio: 44, color: "#FF7B72" },
+    ChannelDescriptor {
+        ch: 0,
+        label: "D0",
+        gpio: 1,
+        color: "#58A6FF",
+    },
+    ChannelDescriptor {
+        ch: 1,
+        label: "D1",
+        gpio: 2,
+        color: "#3FB950",
+    },
+    ChannelDescriptor {
+        ch: 2,
+        label: "D2",
+        gpio: 3,
+        color: "#D29922",
+    },
+    ChannelDescriptor {
+        ch: 3,
+        label: "D3",
+        gpio: 4,
+        color: "#F778BA",
+    },
+    ChannelDescriptor {
+        ch: 4,
+        label: "D4",
+        gpio: 5,
+        color: "#A371F7",
+    },
+    ChannelDescriptor {
+        ch: 5,
+        label: "D5",
+        gpio: 6,
+        color: "#39C5CF",
+    },
+    ChannelDescriptor {
+        ch: 6,
+        label: "D6",
+        gpio: 43,
+        color: "#FFA657",
+    },
+    ChannelDescriptor {
+        ch: 7,
+        label: "D7",
+        gpio: 44,
+        color: "#FF7B72",
+    },
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,17 +97,61 @@ pub struct RatePreset {
 }
 
 pub const RATE_PRESETS: [RatePreset; 11] = [
-    RatePreset { id: 0, label: "1 kHz", hz: 1_000 },
-    RatePreset { id: 1, label: "10 kHz", hz: 10_000 },
-    RatePreset { id: 2, label: "50 kHz", hz: 50_000 },
-    RatePreset { id: 3, label: "100 kHz", hz: 100_000 },
-    RatePreset { id: 4, label: "250 kHz", hz: 250_000 },
-    RatePreset { id: 5, label: "500 kHz", hz: 500_000 },
-    RatePreset { id: 6, label: "1 MHz", hz: 1_000_000 },
-    RatePreset { id: 7, label: "2 MHz", hz: 2_000_000 },
-    RatePreset { id: 8, label: "5 MHz", hz: 5_000_000 },
-    RatePreset { id: 9, label: "10 MHz", hz: 10_000_000 },
-    RatePreset { id: 10, label: "20 MHz", hz: 20_000_000 },
+    RatePreset {
+        id: 0,
+        label: "1 kHz",
+        hz: 1_000,
+    },
+    RatePreset {
+        id: 1,
+        label: "10 kHz",
+        hz: 10_000,
+    },
+    RatePreset {
+        id: 2,
+        label: "50 kHz",
+        hz: 50_000,
+    },
+    RatePreset {
+        id: 3,
+        label: "100 kHz",
+        hz: 100_000,
+    },
+    RatePreset {
+        id: 4,
+        label: "250 kHz",
+        hz: 250_000,
+    },
+    RatePreset {
+        id: 5,
+        label: "500 kHz",
+        hz: 500_000,
+    },
+    RatePreset {
+        id: 6,
+        label: "1 MHz",
+        hz: 1_000_000,
+    },
+    RatePreset {
+        id: 7,
+        label: "2 MHz",
+        hz: 2_000_000,
+    },
+    RatePreset {
+        id: 8,
+        label: "5 MHz",
+        hz: 5_000_000,
+    },
+    RatePreset {
+        id: 9,
+        label: "10 MHz",
+        hz: 10_000_000,
+    },
+    RatePreset {
+        id: 10,
+        label: "20 MHz",
+        hz: 20_000_000,
+    },
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,11 +161,26 @@ pub struct DepthPreset {
 }
 
 pub const DEPTH_PRESETS: [DepthPreset; 5] = [
-    DepthPreset { blocks_kb: 1, label: "1k" },
-    DepthPreset { blocks_kb: 4, label: "4k" },
-    DepthPreset { blocks_kb: 8, label: "8k" },
-    DepthPreset { blocks_kb: 16, label: "16k" },
-    DepthPreset { blocks_kb: 32, label: "32k" },
+    DepthPreset {
+        blocks_kb: 1,
+        label: "1k",
+    },
+    DepthPreset {
+        blocks_kb: 4,
+        label: "4k",
+    },
+    DepthPreset {
+        blocks_kb: 8,
+        label: "8k",
+    },
+    DepthPreset {
+        blocks_kb: 16,
+        label: "16k",
+    },
+    DepthPreset {
+        blocks_kb: 32,
+        label: "32k",
+    },
 ];
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -118,6 +217,26 @@ pub struct BoardCapabilities {
     pub max_rate_hz: u32,
     pub max_depth: usize,
     pub pins: Vec<BoardPinMapping>,
+}
+
+impl BoardCapabilities {
+    /// Builds the Logic Analyzer capability view from a shared `0x83` identity.
+    pub fn from_identity(id: &BoardIdentity) -> Self {
+        let caps = id.capabilities();
+        let pins = id
+            .raw
+            .get("pins")
+            .and_then(|value| serde_json::from_value(value.clone()).ok())
+            .unwrap_or_default();
+        Self {
+            board: id.board.clone(),
+            firmware: Some(id.firmware.clone()),
+            channels: caps.channels.unwrap_or(8) as usize,
+            max_rate_hz: caps.max_rate_hz.unwrap_or(20_000_000) as u32,
+            max_depth: caps.max_depth.unwrap_or(32_768) as usize,
+            pins,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
