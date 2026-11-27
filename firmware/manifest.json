@@ -16,8 +16,8 @@
     },
     {
       "file": "HotWire_XIAO_ESP32C6.ino.bin",
-      "bytes": 263968,
-      "sha256": "ad6418958bdce708fda0a8cf3c5c34a6c49b566cd2feea448cce6f4b875e1fbe",
+      "bytes": 264016,
+      "sha256": "a7c7de1db1d57df4926c9cd0b454401f1cea606bcb4e70b0dd324490faec553a",
       "embedded_firmware": [
         "1.2.1"
       ]
@@ -36,8 +36,8 @@
     },
     {
       "file": "HotWire_XIAO_ESP32S3.ino.bin",
-      "bytes": 282192,
-      "sha256": "a4c7c5c432546b766a4a6535125855bfda28a938d72f3e2d0920985112cfe0c1",
+      "bytes": 282224,
+      "sha256": "5c1634b208a1dffb045d423c5d8fd9da273b200506e2d0ef1e8516808b146e43",
       "embedded_firmware": [
         "1.2.1"
       ]

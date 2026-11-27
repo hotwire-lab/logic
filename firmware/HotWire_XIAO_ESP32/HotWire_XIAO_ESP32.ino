@@ -378,7 +378,7 @@ static void sendCapabilitiesFrame() {
 #if CONFIG_IDF_TARGET_ESP32C6
   static const char CAPS_JSON[] =
     "{\"board\":\"XIAO-ESP32-C6\",\"firmware\":\"" HOTWIRE_FW_VERSION "\",\"schema\":2,\"tool\":\"logic\",\"channels\":8,"
-    "\"maxRateHz\":20000000,\"maxDepth\":32768,"
+    "\"maxRateHz\":20000000,\"maxDepth\":32768,\"max_rate_hz\":20000000,\"max_depth\":32768,"
     "\"pins\":["
     "{\"ch\":0,\"label\":\"D0\",\"gpio\":0},"
     "{\"ch\":1,\"label\":\"D1\",\"gpio\":1},"
@@ -392,7 +392,7 @@ static void sendCapabilitiesFrame() {
 #else
   static const char CAPS_JSON[] =
     "{\"board\":\"XIAO-ESP32-S3\",\"firmware\":\"" HOTWIRE_FW_VERSION "\",\"schema\":2,\"tool\":\"logic\",\"channels\":8,"
-    "\"maxRateHz\":20000000,\"maxDepth\":32768,"
+    "\"maxRateHz\":20000000,\"maxDepth\":32768,\"max_rate_hz\":20000000,\"max_depth\":32768,"
     "\"pins\":["
     "{\"ch\":0,\"label\":\"D0\",\"gpio\":1},"
     "{\"ch\":1,\"label\":\"D1\",\"gpio\":2},"
